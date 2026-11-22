@@ -1,39 +1,51 @@
-# uma.moe client: what is still needed
+# uma.moe client
 
-The uma.moe data source is **not implemented yet**. `fantracker/sources/__init__.py`
-raises a clear error from `build_source()`, and the app reports it in each club's
-`last_error` instead of crashing. Everything else (storage, gain rules, commands,
-API, self-ping) is built and tested against a fake source.
+The uma.moe data source lives in `fantracker/sources/umamoe.py`. It implements the
+`FanSource` protocol in `fantracker/sources/base.py`, and `build_source()` returns it.
 
-## Why
+Everything below comes from the OpenAPI spec at `https://uma.moe/api/docs/openapi.yaml`
+(version 1.0.0, read on 2026-11-22). Nothing is guessed except the items under
+"Assumptions".
 
-The spec at `https://uma.moe/api/docs/openapi.yaml` could not be fetched from the
-build environment (the URL was not on its network allowlist), and the project rule is
-to never invent endpoints, parameters, auth or response fields.
+## What it calls
 
-## What to provide
+| Item | Value from the spec |
+| --- | --- |
+| Request | `GET https://uma.moe/api/v4/circles?circle_id=<club id>` |
+| Auth | `X-API-Key` header (from the `UMAMOE_API_KEY` environment variable only) |
+| Club name | `circle.name` |
+| Member list | `members[]`, no pagination parameters in the spec |
+| Trainer ID | `members[].viewer_id` |
+| Display name | `members[].trainer_name` (nullable; falls back to the trainer ID) |
+| Fan total | `members[].daily_fans`, a 31-element array of cumulative daily fan totals |
 
-Attach the OpenAPI file, or paste these parts of it:
+`month` and `year` are left out, so uma.moe uses the current game month.
 
-1. The endpoint that returns a circle (club) with its members, and its path parameters.
-2. The authentication scheme: header name and format for the API key.
-3. The member fields: trainer ID, display name, and the fan total, with their exact names and types.
-4. Whether the member list is paginated.
-5. Whether a daily fan history is available. If so, gains can come from it directly instead of from our own day snapshots.
+## Assumptions (not verified against the live service)
 
-## What will be written
+- The spec does not say which element of `daily_fans` is "today". The current total is the
+  **last non-zero element**.
+- The spec does not say whether `daily_fans` starts again at the beginning of a month.
+  If it does, gains computed across a month change will look wrong.
+- A member whose `daily_fans` is all zero has no fan total yet, so they are left out
+  until one appears.
+- If **no** member has a fan total (for example right after a month change), the sync
+  fails with a clear error instead of reporting an empty roster, so the tracker keeps
+  its last good data.
 
-One module, `fantracker/sources/umamoe.py`, implementing the `FanSource` protocol in
-`fantracker/sources/base.py`:
+## Errors
 
-```python
-def fetch_club(self, club_id: str) -> ClubSnapshot: ...
-```
+Every failure is raised as `SourceError` and ends up in the club's `last_error`. Messages
+never contain the API key. HTTP 401 and 403 mention `UMAMOE_API_KEY`.
 
-plus a parser test using a response fixture copied from the spec. Nothing else changes:
-`build_source()` returns the new client and the rest of the app already uses it.
+## Tests
 
-## Keep the key out of the repo
+`tests/test_umamoe.py` is **mocked**. Its fixture is hand-written to match the spec's
+`CircleResponse` schema, not captured from the live service. To verify for real, set
+`UMAMOE_API_KEY` and watch the first sync: `last_error` stays empty and the member
+counts match uma.moe.
 
-The key is read from the `UMAMOE_API_KEY` environment variable only. It was shared in
-plain text in a chat preference, so rotate it when convenient.
+## Key hygiene
+
+The key is read from `UMAMOE_API_KEY` only. An earlier key was shared in plain text in a
+chat preference, so rotate it when convenient.
