@@ -42,6 +42,17 @@ class Settings:
     cors_origins: tuple[str, ...]
     port: int
     on_render: bool
+    # AI replies to @mentions, through the self-hosted router (OpenAI-compatible).
+    ai_router_url: str | None = None  # should end in /v1
+    ai_router_api_key: str | None = None
+    ai_model: str = "auto"
+    ai_user_cooldown_seconds: int = 10
+
+
+def ai_enabled(settings: Settings) -> bool:
+    """AI replies need both a router URL (http/https) and a key."""
+    url = settings.ai_router_url
+    return bool(url and settings.ai_router_api_key and url.lower().startswith(("http://", "https://")))
 
 
 def _opt(env: Mapping[str, str], name: str) -> str | None:
@@ -102,6 +113,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         cors_origins=tuple(o.strip() for o in cors.split(",") if o.strip()),
         port=_int(env, "PORT", 8000, minimum=1),
         on_render=_opt(env, "RENDER") is not None,
+        ai_router_url=(_opt(env, "AI_ROUTER_URL") or "").rstrip("/") or None,
+        ai_router_api_key=_opt(env, "AI_ROUTER_API_KEY"),
+        ai_model=_opt(env, "AI_MODEL") or "auto",
+        ai_user_cooldown_seconds=_int(env, "AI_USER_COOLDOWN_SECONDS", 10, minimum=0),
     )
 
 
@@ -122,4 +137,10 @@ def validate_for_runtime(settings: Settings) -> list[str]:
         warnings.append("API_READ_KEY / API_WRITE_KEY are not set: private API endpoints will answer 503.")
     if not settings.umamoe_api_key:
         warnings.append("UMAMOE_API_KEY is not set.")
+    # AI replies are optional, so nothing is said when neither value is set. A placeholder
+    # or half-set value only turns the feature off; it never stops the app.
+    if bool(settings.ai_router_url) != bool(settings.ai_router_api_key):
+        warnings.append("Set both AI_ROUTER_URL and AI_ROUTER_API_KEY to turn on AI replies to @mentions.")
+    elif settings.ai_router_url and not ai_enabled(settings):
+        warnings.append("AI_ROUTER_URL must start with http:// or https://: AI replies are off.")
     return warnings

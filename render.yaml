@@ -26,6 +26,14 @@ services:
       # Optional: set to your server's ID so slash commands appear instantly.
       - key: DISCORD_GUILD_ID
         sync: false
+      # Optional: AI replies when the bot is @mentioned, through your AI router.
+      # AI_ROUTER_URL ends in /v1. Leave both unset to keep the feature off.
+      - key: AI_ROUTER_URL
+        sync: false
+      - key: AI_ROUTER_API_KEY
+        sync: false
+      - key: AI_MODEL
+        value: auto
       - key: CLUB1_ID
         value: "974470619"
       - key: CLUB2_ID

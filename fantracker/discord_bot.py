@@ -4,7 +4,10 @@ Deliberately no `from __future__ import annotations` here: discord.py reads
 the command parameter annotations at runtime.
 
 The wording of every reply lives in commands.py. This module only connects
-Discord interactions to it. Needs no privileged intents.
+Discord interactions to it. Slash commands need no privileged intents. Answering
+@mentions with AI (see llm.py) asks for the Message Content intent so the bot can
+read the message being replied to; if the Developer Portal has that intent off,
+the bot runs without it instead of failing to start.
 """
 
 import asyncio
@@ -18,6 +21,7 @@ from discord import app_commands
 
 from fantracker import commands as cmd
 from fantracker.config import Settings
+from fantracker.llm import HINT, AiAssistant, build_ask_context, build_assistant
 from fantracker.services.tracker import TrackerService
 from fantracker.timeutil import PERIODS
 
@@ -109,10 +113,20 @@ def register_commands(tree: app_commands.CommandTree, service: TrackerService) -
 
 
 class FanBot(discord.Client):
-    def __init__(self, service: TrackerService, settings: Settings, on_state: Callable[[str], None]) -> None:
-        super().__init__(intents=discord.Intents.default(), allowed_mentions=discord.AllowedMentions.none())
+    def __init__(
+        self,
+        service: TrackerService,
+        settings: Settings,
+        on_state: Callable[[str], None],
+        assistant: AiAssistant | None = None,
+        message_content: bool = False,
+    ) -> None:
+        intents = discord.Intents.default()
+        intents.message_content = message_content
+        super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none())
         self._settings = settings
         self._on_state = on_state
+        self._assistant = assistant
         self.tree = app_commands.CommandTree(self)
         register_commands(self.tree, service)
 
@@ -138,6 +152,36 @@ class FanBot(discord.Client):
     async def on_disconnect(self) -> None:
         self._on_state("reconnecting")
 
+    async def _replied_message(self, message: discord.Message):
+        """The message this one replies to, or None."""
+        ref = message.reference
+        if ref is None or ref.message_id is None:
+            return None
+        if isinstance(ref.resolved, discord.Message):
+            return ref.resolved
+        try:
+            return await message.channel.fetch_message(ref.message_id)
+        except discord.HTTPException:  # deleted, or the bot may not read the channel history
+            return None
+
+    async def on_message(self, message: discord.Message) -> None:
+        """Answer "@bot <question>", focusing on the message it replies to when there is one."""
+        if self._assistant is None or self.user is None or message.author.bot:
+            return
+        if self.user.id not in {m.id for m in message.mentions}:
+            return
+        replied = await self._replied_message(message)
+        ctx = build_ask_context(message, replied, self.user.id)
+        try:
+            if ctx is None:
+                await message.reply(HINT, mention_author=False)
+                return
+            async with message.channel.typing():
+                text = await asyncio.to_thread(self._assistant.answer, ctx)
+            await message.reply(text, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException:
+            logger.warning("Could not answer a mention (missing permission or message deleted)")
+
 
 class DiscordRunner:
     """Keeps the bot connected. discord.py reconnects on network loss by itself;
@@ -147,6 +191,10 @@ class DiscordRunner:
         self._token = token
         self._service = service
         self._settings = settings
+        self._assistant = build_assistant(settings)
+        self._message_content = self._assistant is not None
+        if self._assistant is not None:
+            logger.info("AI replies to @mentions are on (model %s)", settings.ai_model)
         self._bot: FanBot | None = None
         self._stopping = False
         self.state = "starting"
@@ -166,13 +214,26 @@ class DiscordRunner:
     async def run(self) -> None:
         backoff = 5
         while not self._stopping:
-            bot = FanBot(self._service, self._settings, self._set_state)
+            bot = FanBot(
+                self._service,
+                self._settings,
+                self._set_state,
+                assistant=self._assistant,
+                message_content=self._message_content,
+            )
             self._bot = bot
             self.state = "starting"
             started = time.monotonic()
             try:
                 await bot.start(self._token, reconnect=True)
             except FATAL as exc:
+                if isinstance(exc, discord.PrivilegedIntentsRequired) and self._message_content:
+                    logger.warning(
+                        "Message Content intent is off in the Discord Developer Portal. Running without it: "
+                        "AI replies work, but the message being replied to may be unreadable."
+                    )
+                    self._message_content = False
+                    continue  # restart straight away without the intent
                 self.state = "error"
                 if isinstance(exc, discord.LoginFailure):
                     self.error = "Discord rejected the login: check DISCORD_TOKEN"
