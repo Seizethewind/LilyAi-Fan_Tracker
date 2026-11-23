@@ -52,6 +52,7 @@ def register_commands(tree: app_commands.CommandTree, service: TrackerService) -
     club_choices.append(app_commands.Choice(name="Both clubs", value="both"))
     period_choices = [app_commands.Choice(name=cmd.PERIOD_LABELS[p], value=p) for p in PERIODS]
     top_choices = [app_commands.Choice(name=f"Top {n}", value=n) for n in cmd.TOP_CHOICES]
+    day_choices = [app_commands.Choice(name=label, value=key) for key, label in cmd.DAY_LABELS.items()]
 
     @tree.command(name="link", description="Link your Discord account to your trainer ID")
     @app_commands.describe(trainer_id="Your in-game trainer ID")
@@ -96,6 +97,23 @@ def register_commands(tree: app_commands.CommandTree, service: TrackerService) -
             str(interaction.user.id),
             period.value,
             str(user.id) if user else None,
+            ephemeral=False,
+        )
+
+    @tree.command(name="fan_gain_history", description="Club fan gain hour by hour since the 00:00 UTC reset")
+    @app_commands.describe(club="Which club", day="Today since the reset, or all of yesterday")
+    @app_commands.choices(club=club_choices, day=day_choices)
+    async def fan_gain_history(
+        interaction: discord.Interaction,
+        club: app_commands.Choice[str],
+        day: app_commands.Choice[str] | None = None,
+    ):
+        await _run(
+            interaction,
+            cmd.cmd_fan_gain_history,
+            service,
+            club.value,
+            day.value if day else "today",
             ephemeral=False,
         )
 

@@ -8,10 +8,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from fantracker.formatting import clean_name, format_int, freshness_line, leaderboard_table
+from fantracker.hourly import hourly_table
 from fantracker.services.tracker import MAX_TOP, TrackerService
 from fantracker.timeutil import PERIODS
 
 PERIOD_LABELS = {"daily": "Daily", "weekly": "Weekly", "monthly": "Monthly"}
+DAY_LABELS = {"today": "Today", "yesterday": "Yesterday"}
 TOP_CHOICES = (10, 15, 30)
 
 
@@ -113,3 +115,39 @@ def cmd_fan_gain(
         description="\n".join(lines),
     )
     return Reply(embeds=[embed])
+
+
+def cmd_fan_gain_history(service: TrackerService, club_choice: str, day: str = "today") -> Reply:
+    """The club's fan gain hour by hour since the 00:00 UTC reset (or all of yesterday)."""
+    if day not in DAY_LABELS:
+        return _error("Pick today or yesterday.")
+    if club_choice == "both":
+        clubs = list(service.clubs)
+    else:
+        club = service.club(club_choice)
+        if club is None:
+            return _error("Unknown club.")
+        clubs = [club]
+
+    embeds = []
+    for club in clubs:
+        view = service.fan_gain_history(club, day)
+        history = view.history
+        lines = [hourly_table(history)]
+        if history.lines:
+            if history.starts_late:
+                lines.append(
+                    f"_Hourly tracking began at {history.first_mark:%H:%M} UTC, so the total covers only from then._"
+                )
+            if any(line.live for line in history.lines):
+                lines.append("`*` the hour still in progress (not saved yet).")
+            lines.append("_Current members only. New joiners count from the next UTC day._")
+        if day == "today":
+            lines.append(freshness_line(view.info.last_synced_at, view.resets_at))
+        embeds.append(
+            EmbedData(
+                title=f"{club.label} · Hourly fan gain · {history.day_start:%a %d %b} (UTC)",
+                description="\n".join(lines),
+            )
+        )
+    return Reply(embeds=embeds)

@@ -1,0 +1,55 @@
+# Hourly fan gain history
+
+`/fan_gain_history` shows a club's fan gain hour by hour, from the last daily reset
+(00:00 UTC) up to now.
+
+```
+Club 1 · Hourly fan gain · Wed 04 Nov (UTC)
+UTC     This hour  Since reset
+01:00    +500,000     +500,000
+02:00    +600,000   +1,100,000
+02:40*   +150,000   +1,250,000
+Total               +1,250,000
+```
+
+## Options
+
+- **club**: Club 1, Club 2 or Both clubs.
+- **day**: `Today` (default) or `Yesterday`. Yesterday is the full 24 hours; its last line is
+  stored at the reset and labelled `24:00`.
+
+## What is stored
+
+At every flat UTC hour the bot saves each member's fan total in `hour_snapshots`. The snapshot is
+taken by the first successful sync in that hour, so a mark can be up to one sync interval
+(5 minutes) late. Rows older than 8 days are deleted.
+
+Only the **totals** are stored. Both columns are computed from them:
+
+- **This hour**: this hour's total minus the previous stored hour's total, added up over members.
+- **Since reset**: the running sum of the "This hour" lines. The **Total** is the last
+  "Since reset", never a sum of that column, so nothing is counted twice.
+
+Because of that, at any moment: last "Since reset" = sum of "This hour" = `/leaderboard daily`
+summed over the club (when history covers the whole day). A test checks this.
+
+## Rules
+
+- **Only current members count.** Someone who left never appears, even for hours before they left.
+- **Joiners count from the next UTC day**, the same as the daily gain. Only members already
+  present at the first stored hour of the day are counted.
+- **Missed hours are not invented.** If the bot was off for a while, the next stored hour carries
+  the whole gap and is marked like `04:00 (3h)`.
+- **The `*` line** is the hour still in progress, worked out from the latest sync when you run the
+  command. It is not stored. It makes the total match the daily gain right now.
+- **Tally resets**: if a member's total drops below the previous hour's (for example when uma.moe
+  starts a new month), the new total is counted as that hour's gain, the same rule as elsewhere.
+  Around a month change the hourly sum can therefore differ from the daily gain.
+- **Not backfilled.** History starts when this feature is first deployed; the command says
+  "Hourly tracking began at HH:MM UTC" when the first stored hour is after the reset.
+
+## Limits
+
+- Accuracy depends on how often uma.moe refreshes member fan totals. If it refreshes less than
+  hourly, some hours show 0 followed by a larger jump. This has not been checked on live data.
+- Tests use a fake data source and in-memory SQLite. They do not show how Turso or uma.moe behave.
