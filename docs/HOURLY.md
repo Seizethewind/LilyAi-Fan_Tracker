@@ -14,9 +14,31 @@ Total               +1,250,000
 
 ## Options
 
-- **club**: Club 1, Club 2 or Both clubs.
+- **club**: Club 1, Club 2 or Both clubs. Shows the club's total.
+- **user**: another Discord user. Shows that one trainer's own hourly gain, found through their
+  linked trainer ID (`/link`), the same as `/fan_gain`.
+- **neither**: shows your own hourly gain (you need to have used `/link`).
 - **day**: `Today` (default) or `Yesterday`. Yesterday is the full 24 hours; its last line is
   stored at the reset and labelled `24:00`.
+
+Pick a club **or** a user, not both.
+
+## One trainer's view
+
+```
+Alice · Hourly fan gain · Wed 04 Nov (UTC)
+Club: Club 1
+UTC     This hour  Since reset
+01:00     +300,000     +300,000
+02:00     +400,000     +700,000
+02:40*     +50,000     +750,000
+Total                  +750,000
+```
+
+It uses the same stored hourly totals, the same lines and the same rules, counting only that
+trainer. The Total is the same number `/fan_gain` shows for the day, and the trainers' totals add up
+to the club's. A trainer who joined during the day has no hourly gains until the next UTC day (the
+command says so), and a trainer who has left has no history.
 
 ## What is stored
 
