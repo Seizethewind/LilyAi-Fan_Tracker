@@ -110,7 +110,15 @@ def test_reasoning_blocks_are_removed_from_the_answer():
 
 @pytest.mark.parametrize(
     "body",
-    [{}, {"choices": []}, {"choices": [{"message": {}}]}, completion(""), completion("<think>x</think>"), completion(None), []],
+    [
+        {},
+        {"choices": []},
+        {"choices": [{"message": {}}]},
+        completion(""),
+        completion("<think>x</think>"),
+        completion(None),
+        [],
+    ],
 )
 def test_unusable_answers_are_router_errors(body):
     c, _ = client(FakeResponse(200, body))
