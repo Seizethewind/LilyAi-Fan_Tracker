@@ -117,10 +117,18 @@ def cmd_fan_gain(
     return Reply(embeds=[embed])
 
 
-def cmd_fan_gain_history(service: TrackerService, club_choice: str, day: str = "today") -> Reply:
-    """The club's fan gain hour by hour since the 00:00 UTC reset (or all of yesterday)."""
-    if day not in DAY_LABELS:
-        return _error("Pick today or yesterday.")
+def _history_notes(history, *, club_total: bool) -> list[str]:
+    notes = []
+    if history.starts_late:
+        notes.append(f"_Hourly tracking began at {history.first_mark:%H:%M} UTC, so the total covers only from then._")
+    if any(line.live for line in history.lines):
+        notes.append("`*` the hour still in progress (not saved yet).")
+    if club_total:
+        notes.append("_Current members only. New joiners count from the next UTC day._")
+    return notes
+
+
+def _club_history(service: TrackerService, club_choice: str, day: str) -> Reply:
     if club_choice == "both":
         clubs = list(service.clubs)
     else:
@@ -135,13 +143,7 @@ def cmd_fan_gain_history(service: TrackerService, club_choice: str, day: str = "
         history = view.history
         lines = [hourly_table(history)]
         if history.lines:
-            if history.starts_late:
-                lines.append(
-                    f"_Hourly tracking began at {history.first_mark:%H:%M} UTC, so the total covers only from then._"
-                )
-            if any(line.live for line in history.lines):
-                lines.append("`*` the hour still in progress (not saved yet).")
-            lines.append("_Current members only. New joiners count from the next UTC day._")
+            lines += _history_notes(history, club_total=True)
         if day == "today":
             lines.append(freshness_line(view.info.last_synced_at, view.resets_at))
         embeds.append(
@@ -151,3 +153,60 @@ def cmd_fan_gain_history(service: TrackerService, club_choice: str, day: str = "
             )
         )
     return Reply(embeds=embeds)
+
+
+def _member_history(service: TrackerService, discord_id: str, looking_up_other: bool, day: str) -> Reply:
+    trainer_id = service.linked_trainer(discord_id)
+    if trainer_id is None:
+        if looking_up_other:
+            return _error("That user hasn't linked a trainer ID.")
+        return _error("You haven't linked a trainer ID yet. Use `/link` first, or pick a club.")
+    view = service.trainer_fan_gain_history(trainer_id, day)
+    if view is None:
+        return _error(
+            "That trainer isn't on either club roster right now. If they just joined, "
+            "wait for the next update (every 5 minutes)."
+        )
+    history = view.history
+    lines = [f"**Club:** {view.club.label}"]
+    if not history.counted:
+        lines.append("_Joined during this day, so hourly gains start counting from the next UTC day._")
+    else:
+        lines.append(hourly_table(history))
+        if history.lines:
+            lines += _history_notes(history, club_total=False)
+    if day == "today":
+        lines.append(freshness_line(view.info.last_synced_at, view.resets_at))
+    name = clean_name(view.trainer_name or view.trainer_id or "")
+    return Reply(
+        embeds=[
+            EmbedData(
+                title=f"{name} · Hourly fan gain · {history.day_start:%a %d %b} (UTC)",
+                description="\n".join(lines),
+            )
+        ]
+    )
+
+
+def cmd_fan_gain_history(
+    service: TrackerService,
+    club_choice: str | None,
+    day: str = "today",
+    discord_id: str | None = None,
+    target_discord_id: str | None = None,
+) -> Reply:
+    """Fan gain hour by hour since the 00:00 UTC reset (or all of yesterday).
+
+    A club picked: the club's total. A user picked, or nothing picked: that member's own hourly gain
+    (yourself when nothing is picked), found through the linked trainer ID like `/fan_gain`.
+    """
+    if day not in DAY_LABELS:
+        return _error("Pick today or yesterday.")
+    if club_choice and target_discord_id:
+        return _error("Pick a club or a user, not both.")
+    if club_choice:
+        return _club_history(service, club_choice, day)
+    who = target_discord_id or discord_id
+    if who is None:
+        return _error("Pick a club or a user.")
+    return _member_history(service, who, target_discord_id is not None and target_discord_id != discord_id, day)

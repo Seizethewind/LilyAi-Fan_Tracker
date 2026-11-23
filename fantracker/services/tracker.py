@@ -67,6 +67,8 @@ class HourlyView:
     history: HourlyHistory
     info: ClubInfo
     resets_at: datetime
+    trainer_id: str | None = None  # set when the history is for one member instead of the club
+    trainer_name: str | None = None
 
 
 class TrackerService:
@@ -147,6 +149,19 @@ class TrackerService:
 
     def fan_gain_history(self, club: ClubConfig, day: str = "today") -> HourlyView:
         """The club's fan gain hour by hour: today since the 00:00 UTC reset, or all of yesterday."""
+        return self._hourly_view(club, day)
+
+    def trainer_fan_gain_history(self, trainer_id: str, day: str = "today") -> HourlyView | None:
+        """The same hourly history for one member on a roster now; None if they are not on one."""
+        found = self.store.find_active_member(trainer_id)
+        club = self._by_id.get(found[0]) if found else None
+        if found is None or club is None:
+            return None
+        return self._hourly_view(club, day, trainer_id, found[1])
+
+    def _hourly_view(
+        self, club: ClubConfig, day: str, trainer_id: str | None = None, trainer_name: str | None = None
+    ) -> HourlyView:
         if day not in DAYS:
             raise ValueError(f"day must be one of {', '.join(DAYS)}")
         now = self._clock()
@@ -160,7 +175,8 @@ class TrackerService:
             start, end = today_start, resets_at
             current, live_time = self.store.current_fans(club.club_id), info.last_synced_at or now
         rows = self.store.hour_rows(club.club_id, start, end)
-        return HourlyView(club, day, build_history(rows, current, start, end, live_time), info, resets_at)
+        history = build_history(rows, current, start, end, live_time, only=trainer_id)
+        return HourlyView(club, day, history, info, resets_at, trainer_id, trainer_name)
 
     # ---- discord links -------------------------------------------------
 
