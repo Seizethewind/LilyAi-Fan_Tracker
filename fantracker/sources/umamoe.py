@@ -17,7 +17,10 @@ See docs/UMAMOE.md.
 
 from __future__ import annotations
 
+import logging
 import re
+import time
+from collections.abc import Callable
 from typing import Any
 
 import requests
@@ -25,9 +28,12 @@ import requests
 from fantracker.models import ClubSnapshot, SourceMember
 from fantracker.sources.base import SourceError
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_BASE_URL = "https://uma.moe"
 CIRCLES_PATH = "/api/v4/circles"
 DEFAULT_TIMEOUT_SECONDS = 15.0
+SUMMARY_LOG_SECONDS = 1800  # repeat the roster summary at most this often while its counts stay the same
 
 _CLUB_ID = re.compile(r"\d{1,20}")
 
@@ -86,6 +92,24 @@ def parse_circle_response(payload: Any, club_id: str) -> ClubSnapshot:
     )
 
 
+def roster_summary(payload: dict[str, Any], snapshot: ClubSnapshot) -> tuple[tuple[Any, ...], str]:
+    """Counts and timestamps that show how fresh uma.moe's roster is. No names or trainer IDs.
+
+    Returns (counts, text). The counts change when the roster changes; the text also holds
+    the timestamps.
+    """
+    circle = payload["circle"]
+    rows = payload["members"]
+    stamps = sorted(str(r["last_updated"]) for r in rows if isinstance(r, dict) and r.get("last_updated"))
+    counts = (circle.get("member_count"), len(rows), len(snapshot.members))
+    text = (
+        f"uma.moe club {snapshot.club_id}: member_count={counts[0]}, listed={counts[1]}, "
+        f"with fan data={counts[2]}, circle last_updated={circle.get('last_updated')}, "
+        f"member last_updated oldest={stamps[0] if stamps else None} newest={stamps[-1] if stamps else None}"
+    )
+    return counts, text
+
+
 def _http_error(response: Any) -> str:
     detail = ""
     try:
@@ -108,6 +132,7 @@ class UmaMoeSource:
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         session: Any = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if not api_key:
             raise SourceError("UMAMOE_API_KEY is not set")
@@ -115,6 +140,17 @@ class UmaMoeSource:
         self._url = base_url.rstrip("/") + CIRCLES_PATH
         self._timeout = timeout
         self._session = session if session is not None else requests.Session()
+        self._clock = clock
+        self._last_summary: dict[str, tuple[tuple[Any, ...], float]] = {}
+
+    def _log_summary(self, payload: dict[str, Any], snapshot: ClubSnapshot) -> None:
+        """Log how fresh the roster is: when its counts change, and otherwise every half hour."""
+        counts, text = roster_summary(payload, snapshot)
+        now = self._clock()
+        last = self._last_summary.get(snapshot.club_id)
+        if last is None or last[0] != counts or now - last[1] >= SUMMARY_LOG_SECONDS:
+            self._last_summary[snapshot.club_id] = (counts, now)
+            logger.info(text)
 
     def fetch_club(self, club_id: str) -> ClubSnapshot:
         club_id = str(club_id).strip()
@@ -135,4 +171,6 @@ class UmaMoeSource:
             payload = response.json()
         except ValueError as exc:
             raise SourceError("uma.moe returned invalid JSON") from exc
-        return parse_circle_response(payload, club_id)
+        snapshot = parse_circle_response(payload, club_id)
+        self._log_summary(payload, snapshot)
+        return snapshot
