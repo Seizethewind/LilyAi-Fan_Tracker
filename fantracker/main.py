@@ -12,13 +12,15 @@ import logging
 import os
 import sys
 from contextlib import asynccontextmanager
+from datetime import timedelta
 
 import uvicorn
 from fastapi import FastAPI
 
 from fantracker.api import create_app
 from fantracker.config import ConfigError, load_settings, validate_for_runtime
-from fantracker.runner import SyncRunner, run_self_ping
+from fantracker.quota import build_quota_posts
+from fantracker.runner import SyncRunner, SyncTooSoon, run_quota_warning, run_self_ping
 from fantracker.services.tracker import TrackerService
 from fantracker.sources import SourceError, build_source
 from fantracker.storage import SqliteDatabase, Store, TursoDatabase
@@ -81,6 +83,10 @@ def build_app() -> FastAPI:
             return {"state": "disabled", "latency_ms": None, "error": None}
         return discord_runner.status()
 
+    async def refresh_before_quota() -> None:
+        with contextlib.suppress(SyncTooSoon):  # data from the last few seconds is fresh enough
+            await sync_runner.sync_now()
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         stop = asyncio.Event()
@@ -96,6 +102,22 @@ def build_app() -> FastAPI:
             logger.info("Self-ping is off (no RENDER_EXTERNAL_URL or SELF_PING_URL).")
         if discord_runner is not None:
             tasks.append(asyncio.create_task(discord_runner.run(), name="discord"))
+        if discord_runner is not None and settings.quota_channel_id:
+            runner, channel_id = discord_runner, settings.quota_channel_id
+            max_age = timedelta(seconds=settings.sync_interval_seconds * 2 + 60)
+            logger.info("Quota warning: %s fans, daily at %02d:00 UTC", settings.quota_fans, settings.quota_hour_utc)
+            tasks.append(
+                asyncio.create_task(
+                    run_quota_warning(
+                        lambda: build_quota_posts(service, runner.assistant, settings.quota_fans, max_age),
+                        lambda texts: runner.post(channel_id, texts),
+                        settings.quota_hour_utc,
+                        stop,
+                        refresh=refresh_before_quota,
+                    ),
+                    name="quota",
+                )
+            )
         try:
             yield
         finally:

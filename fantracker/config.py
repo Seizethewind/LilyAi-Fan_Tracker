@@ -47,6 +47,10 @@ class Settings:
     ai_router_api_key: str | None = None
     ai_model: str = "auto"
     ai_user_cooldown_seconds: int = 10
+    # Daily fan quota warning: posted once a day at quota_hour_utc when quota_channel_id is set.
+    quota_fans: int = 5_000_000
+    quota_channel_id: int | None = None
+    quota_hour_utc: int = 22  # 22:00 UTC is 6:00 AM in the Philippines
 
 
 def ai_enabled(settings: Settings) -> bool:
@@ -88,6 +92,13 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if guild_raw is not None and not guild_raw.isdigit():
         raise ConfigError("DISCORD_GUILD_ID must be a numeric Discord server id")
 
+    channel_raw = _opt(env, "QUOTA_CHANNEL_ID")
+    if channel_raw is not None and not channel_raw.isdigit():
+        raise ConfigError("QUOTA_CHANNEL_ID must be a numeric Discord channel id")
+    quota_hour = _int(env, "QUOTA_HOUR_UTC", 22, minimum=0)
+    if quota_hour > 23:
+        raise ConfigError("QUOTA_HOUR_UTC must be between 0 and 23")
+
     ping_url = _opt(env, "SELF_PING_URL")
     if ping_url is None:
         external = _opt(env, "RENDER_EXTERNAL_URL")  # set automatically by Render
@@ -117,6 +128,9 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         ai_router_api_key=_opt(env, "AI_ROUTER_API_KEY"),
         ai_model=_opt(env, "AI_MODEL") or "auto",
         ai_user_cooldown_seconds=_int(env, "AI_USER_COOLDOWN_SECONDS", 10, minimum=0),
+        quota_fans=_int(env, "QUOTA_FANS", 5_000_000, minimum=1),
+        quota_channel_id=int(channel_raw) if channel_raw else None,
+        quota_hour_utc=quota_hour,
     )
 
 
@@ -137,6 +151,8 @@ def validate_for_runtime(settings: Settings) -> list[str]:
         warnings.append("API_READ_KEY / API_WRITE_KEY are not set: private API endpoints will answer 503.")
     if not settings.umamoe_api_key:
         warnings.append("UMAMOE_API_KEY is not set.")
+    if settings.quota_channel_id and not settings.discord_token:
+        warnings.append("QUOTA_CHANNEL_ID is set but DISCORD_TOKEN is not: no quota warning will be posted.")
     # AI replies are optional, so nothing is said when neither value is set. A placeholder
     # or half-set value only turns the feature off; it never stops the app.
     if bool(settings.ai_router_url) != bool(settings.ai_router_api_key):

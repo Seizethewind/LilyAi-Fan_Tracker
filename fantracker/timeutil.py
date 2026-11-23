@@ -45,6 +45,13 @@ def next_reset(period: str, now: datetime) -> datetime:
     return datetime(following.year, following.month, following.day, tzinfo=UTC)
 
 
+def next_daily_time(hour: int, now: datetime) -> datetime:
+    """The next `hour`:00 UTC strictly after `now`."""
+    now = _as_utc(now)
+    at = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+    return at if at > now else at + timedelta(days=1)
+
+
 def iso(moment: datetime) -> str:
     return _as_utc(moment).isoformat(timespec="seconds")
 

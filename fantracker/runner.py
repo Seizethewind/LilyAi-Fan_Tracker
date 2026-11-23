@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from datetime import datetime
 
 import requests
 
 from fantracker.models import SyncOutcome
 from fantracker.services.tracker import TrackerService
+from fantracker.timeutil import next_daily_time, utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -93,3 +95,46 @@ async def run_self_ping(
             reported_ok = True
         else:
             logger.debug("Self-ping OK (HTTP %s)", status)
+
+
+async def run_quota_warning(
+    build: Callable[[], list[str]],
+    post: Callable[[list[str]], Awaitable[bool]],
+    hour_utc: int,
+    stop: asyncio.Event,
+    *,
+    refresh: Callable[[], Awaitable[object]] | None = None,
+    clock: Callable[[], datetime] = utc_now,
+    retry_seconds: float = 300,
+    attempts: int = 6,
+) -> None:
+    """Once a day at `hour_utc`: refresh the data, build the warning, post it.
+
+    `build` is blocking and runs in a worker thread. A failed post is retried every `retry_seconds`,
+    `attempts` times in all. A restart after the hour has passed skips that day rather than posting late.
+    """
+    while True:
+        now = clock()
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=(next_daily_time(hour_utc, now) - now).total_seconds())
+            return  # asked to stop
+        except TimeoutError:
+            pass
+        try:
+            if refresh is not None:
+                await refresh()
+            posts = await asyncio.to_thread(build)
+            for attempt in range(1, attempts + 1):
+                if not posts or await post(posts):
+                    break
+                logger.warning("Quota warning not posted (attempt %s of %s)", attempt, attempts)
+                if attempt == attempts:
+                    logger.error("Giving up on today's quota warning")
+                    break
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=retry_seconds)
+                    return
+                except TimeoutError:
+                    pass
+        except Exception:  # noqa: BLE001 - one bad day must not end the loop
+            logger.exception("Quota warning failed")

@@ -26,6 +26,23 @@ process, and a self-pinger requests the service's own `/health` every 300 second
 - Data refreshes every 5 minutes. Commands read saved data and never call uma.moe directly.
 - Tables show at most 30 rows per club.
 
+## Daily quota warning
+
+Set `QUOTA_CHANNEL_ID` and every day at `QUOTA_HOUR_UTC` (default 22:00 UTC, which is **6:00 AM in the
+Philippines**) the bot refreshes the data and posts, in that channel, the members whose gain **today so far**
+is below `QUOTA_FANS` (default 5,000,000), one table per club. That is two hours before the 00:00 UTC reset,
+so they still have time to catch up.
+
+- Nobody is pinged; members are listed by name.
+- The AI router writes the opening lines (it is only given the quota and a head count, never member names).
+  If the router is down or not configured, a plain reminder is used instead; the list is the same either way.
+- Members on their join day are not listed (their gain counts as 0), and a club whose data is stale
+  (last successful sync older than two sync intervals) is skipped and logged, rather than blaming people
+  for numbers that are out of date.
+- If nobody is under the quota, nothing is posted.
+- The bot needs permission to view and send messages in that channel. If it is restarted after the hour has
+  passed, that day's warning is skipped.
+
 ## Run locally
 
 ```bash
@@ -68,6 +85,7 @@ fantracker/
   commands.py, formatting.py command replies and tables
   discord_bot.py             discord.py wiring
   api.py, auth.py            FastAPI routes, bearer keys, rate limit
-  runner.py                  5-minute sync loop and self-ping loop
+  runner.py                  5-minute sync loop, self-ping loop and the daily quota loop
+  quota.py                   who is under the quota and the warning messages
   main.py                    entry point
 ```

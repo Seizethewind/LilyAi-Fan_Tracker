@@ -10,8 +10,8 @@ import logging
 import re
 import threading
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
 
 from fantracker.config import ClubConfig
 from fantracker.models import ClubInfo, StandingRow, SyncOutcome, SyncResult
@@ -56,6 +56,20 @@ class Standing:
     row: StandingRow
     roster_size: int
     info: ClubInfo
+    resets_at: datetime
+
+
+@dataclass(frozen=True)
+class ClubShortfall:
+    club: ClubConfig
+    rows: list[StandingRow]  # members under the quota, lowest gain first, ranked 1..n
+
+
+@dataclass(frozen=True)
+class QuotaReport:
+    shortfalls: list[ClubShortfall]  # only clubs with at least one member under the quota
+    stale: list[ClubConfig]  # clubs skipped because their data is too old to judge anyone by
+    now: datetime
     resets_at: datetime
 
 
@@ -134,6 +148,28 @@ class TrackerService:
         if row is None:
             return None
         return Standing(club, period, row, len(rows), self.store.club_info(club.club_id), next_reset(period, now))
+
+    def quota_report(self, quota: int, max_age: timedelta) -> QuotaReport:
+        """Members whose gain today is below `quota`.
+
+        Members on their join day are left out (their gain counts as 0 by the rules), and so is any
+        club whose last successful sync is older than `max_age`: stale data would blame people unfairly.
+        """
+        now = self._clock()
+        shortfalls: list[ClubShortfall] = []
+        stale: list[ClubConfig] = []
+        for club in self.clubs:
+            synced = self.store.club_info(club.club_id).last_synced_at
+            if synced is None or now - synced > max_age:
+                stale.append(club)
+                continue
+            under = sorted(
+                (r for r in self.store.standings(club.club_id, "daily", now) if r.has_baseline and r.gain < quota),
+                key=lambda r: r.gain,
+            )
+            if under:
+                shortfalls.append(ClubShortfall(club, [replace(r, rank=i) for i, r in enumerate(under, start=1)]))
+        return QuotaReport(shortfalls, stale, now, next_reset("daily", now))
 
     # ---- discord links -------------------------------------------------
 

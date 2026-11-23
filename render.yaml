@@ -34,6 +34,14 @@ services:
         sync: false
       - key: AI_MODEL
         value: auto
+      # Optional: the channel for the daily fan quota warning (6:00 AM Philippines = 22:00 UTC).
+      # Leave QUOTA_CHANNEL_ID unset to keep the warning off.
+      - key: QUOTA_CHANNEL_ID
+        sync: false
+      - key: QUOTA_FANS
+        value: "5000000"
+      - key: QUOTA_HOUR_UTC
+        value: "22"
       - key: CLUB1_ID
         value: "974470619"
       - key: CLUB2_ID
