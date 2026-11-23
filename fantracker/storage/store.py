@@ -18,13 +18,19 @@ That one rule produces the behaviour the project asked for:
   baseline is restored. Rejoining in a later month finds none for the new
   month, so they start over like a new player.
 
+Hourly history
+--------------
+`hour_snapshots` is the same idea once per flat UTC hour: each member's fan
+total as of the first successful sync in that hour, kept for a few days. The
+hourly fan gain history (fantracker/hourly.py) is computed from it.
+
 Writes in `apply_sync` are ordered so that a failure part-way (Turso
 pipelines are not atomic) is repaired by the next sync.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from fantracker.models import ClubInfo, ClubSnapshot, StandingRow, SyncResult
 from fantracker.storage.db import Database
@@ -56,6 +62,13 @@ SCHEMA = (
         fans INTEGER NOT NULL,
         PRIMARY KEY (club_id, trainer_id, day)
     )""",
+    """CREATE TABLE IF NOT EXISTS hour_snapshots (
+        club_id TEXT NOT NULL,
+        trainer_id TEXT NOT NULL,
+        hour TEXT NOT NULL,
+        fans INTEGER NOT NULL,
+        PRIMARY KEY (club_id, trainer_id, hour)
+    )""",
     """CREATE TABLE IF NOT EXISTS links (
         discord_id TEXT PRIMARY KEY,
         trainer_id TEXT NOT NULL,
@@ -71,6 +84,22 @@ SELECT m.trainer_id, m.name, m.fans,
 FROM members m
 WHERE m.club_id = ? AND m.active = 1
 """
+
+# Only members on the roster now: someone who left never appears in the hourly history.
+HOUR_ROWS_SQL = """
+SELECT h.trainer_id, h.hour, h.fans
+FROM hour_snapshots h
+JOIN members m ON m.club_id = h.club_id AND m.trainer_id = h.trainer_id AND m.active = 1
+WHERE h.club_id = ? AND h.hour >= ? AND h.hour <= ?
+ORDER BY h.hour ASC
+"""
+
+HOUR_HISTORY_DAYS = 8  # hourly snapshots older than this are deleted
+
+
+def hour_mark(moment: datetime) -> datetime:
+    """The flat UTC hour that `moment` falls in."""
+    return moment.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
 
 
 def compute_gain(current: int, baseline: int | None) -> int:
@@ -102,20 +131,21 @@ class Store:
 
         members = {m.trainer_id: m for m in snapshot.members}  # de-duplicate by trainer id
         today = period_start_day("daily", now).isoformat()
+        mark = hour_mark(now)
+        hour = iso(mark)
         stamp = iso(now)
         club_id = snapshot.club_id
 
-        known = {
-            trainer_id: bool(active)
-            for trainer_id, active in self.db.execute(
-                "SELECT trainer_id, active FROM members WHERE club_id = ?", (club_id,)
-            )
-        }
-        have_today_snapshot = bool(
-            self.db.execute(
-                "SELECT 1 FROM day_snapshots WHERE club_id = ? AND day = ? LIMIT 1", (club_id, today)
-            )
+        known_rows, today_rows, hour_found = self.db.execute_many(
+            [
+                ("SELECT trainer_id, active FROM members WHERE club_id = ?", (club_id,)),
+                ("SELECT 1 FROM day_snapshots WHERE club_id = ? AND day = ? LIMIT 1", (club_id, today)),
+                ("SELECT 1 FROM hour_snapshots WHERE club_id = ? AND hour = ? LIMIT 1", (club_id, hour)),
+            ]
         )
+        known = {trainer_id: bool(active) for trainer_id, active in known_rows}
+        have_today_snapshot = bool(today_rows)
+        have_hour_snapshot = bool(hour_found)
 
         present = list(members)
         joined = [t for t in present if not known.get(t, False)]
@@ -149,6 +179,23 @@ class Store:
                     "INSERT OR IGNORE INTO day_snapshots (club_id, trainer_id, day, fans) "
                     f"VALUES {', '.join(['(?, ?, ?, ?)'] * len(members))}",
                     snap_values,
+                )
+            )
+        if not have_hour_snapshot:
+            hour_values: list = []
+            for member in members.values():
+                hour_values += [club_id, member.trainer_id, hour, member.fans]
+            statements.append(
+                (
+                    "INSERT OR IGNORE INTO hour_snapshots (club_id, trainer_id, hour, fans) "
+                    f"VALUES {', '.join(['(?, ?, ?, ?)'] * len(members))}",
+                    hour_values,
+                )
+            )
+            statements.append(
+                (
+                    "DELETE FROM hour_snapshots WHERE club_id = ? AND hour < ?",
+                    [club_id, iso(mark - timedelta(days=HOUR_HISTORY_DAYS))],
                 )
             )
         # Last, so `last_synced_at` only moves when everything above worked.
@@ -200,6 +247,16 @@ class Store:
             StandingRow(rank, trainer_id, name, fans, gain, has_baseline)
             for rank, (gain, fans, name, trainer_id, has_baseline) in enumerate(scored, start=1)
         ]
+
+    def hour_rows(self, club_id: str, start: datetime, end: datetime) -> list[tuple[str, datetime, int]]:
+        """(trainer_id, hour, fans) for current members, from `start` to `end`, both included."""
+        rows = self.db.execute(HOUR_ROWS_SQL, (club_id, iso(start), iso(end)))
+        return [(trainer_id, datetime.fromisoformat(hour), int(fans)) for trainer_id, hour, fans in rows]
+
+    def current_fans(self, club_id: str) -> dict[str, int]:
+        """Latest fan total of every member on the roster now."""
+        rows = self.db.execute("SELECT trainer_id, fans FROM members WHERE club_id = ? AND active = 1", (club_id,))
+        return {trainer_id: int(fans) for trainer_id, fans in rows}
 
     def find_active_member(self, trainer_id: str) -> tuple[str, str, int] | None:
         """(club_id, name, fans) of the roster entry for this trainer, if on a roster now."""
