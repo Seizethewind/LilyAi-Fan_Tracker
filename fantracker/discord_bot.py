@@ -258,6 +258,27 @@ class DiscordRunner:
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 300)
 
+    @property
+    def assistant(self) -> AiAssistant | None:
+        return self._assistant
+
+    async def post(self, channel_id: int, texts: list[str]) -> bool:
+        """Send messages to one channel, never pinging anyone. False when the bot cannot post right now."""
+        bot = self._bot
+        if bot is None or self.state != "ready":
+            return False
+        try:
+            channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
+            if not isinstance(channel, discord.abc.Messageable):
+                logger.warning("Channel %s cannot receive messages", channel_id)
+                return False
+            for text in texts:
+                await channel.send(text, allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException as exc:  # not found, no permission, rate limited...
+            logger.warning("Could not post to channel %s (HTTP %s)", channel_id, exc.status)
+            return False
+        return True
+
     async def close(self) -> None:
         self._stopping = True
         if self._bot is not None:
