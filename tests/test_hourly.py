@@ -169,3 +169,87 @@ def test_command_before_any_data_says_so(world):
 def test_command_rejects_unknown_club_and_day(world):
     assert cmd_fan_gain_history(world.service, "club9").ephemeral
     assert cmd_fan_gain_history(world.service, "club1", "tomorrow").ephemeral
+
+
+# ---- one member's own hourly gain (the same command, with a user or yourself) ----
+
+
+def member_history(world, trainer_id, day="today"):
+    return world.service.trainer_fan_gain_history(trainer_id, day)
+
+
+def test_one_members_lines_use_only_their_own_totals(world):
+    two_members_for_a_morning(world)
+    a = member_history(world, "A").history
+    assert summary(a) == [
+        ("01:00", 1, 300, 300, False),
+        ("02:00", 1, 400, 700, False),
+        ("02:40", 0, 50, 750, True),
+    ]
+    assert member_history(world, "A").trainer_name == "Alice"
+    assert a.total == world.gain("A", "daily")[0] == 750  # the same number /fan_gain shows
+
+
+def test_members_add_up_to_the_club(world):
+    two_members_for_a_morning(world)
+    totals = [member_history(world, t).history.total for t in ("A", "B")]
+    assert totals == [750, 550]
+    assert sum(totals) == history(world).total == daily_total(world)
+
+
+def test_a_member_who_joined_today_has_no_hourly_gains_yet(world):
+    world.at("2026-11-04 00:05").roster({"A": ("Alice", 1000)}).sync()
+    world.at("2026-11-04 02:05").roster({"A": ("Alice", 1200), "B": ("Bob", 5000)}).sync()  # Bob joins
+    world.at("2026-11-04 03:05").roster({"A": ("Alice", 1250), "B": ("Bob", 5400)}).sync()
+    bob = member_history(world, "B").history
+    assert not bob.counted and bob.lines == ()
+    assert member_history(world, "A").history.counted
+
+
+def test_a_member_who_left_has_no_history(world):
+    world.at("2026-11-04 00:05").roster({"A": ("Alice", 1000), "C": ("Cara", 5000)}).sync()
+    world.at("2026-11-04 01:05").roster({"A": ("Alice", 1100)}).sync()  # Cara has left
+    assert member_history(world, "C") is None
+
+
+def test_command_shows_your_own_hours_when_you_pick_nothing(world):
+    two_members_for_a_morning(world)
+    world.service.link("111", "A")
+    (embed,) = cmd_fan_gain_history(world.service, None, "today", "111").embeds
+    assert embed.title == "Alice · Hourly fan gain · Wed 04 Nov (UTC)"
+    for text in ("Club 1", "01:00", "+300", "+700", "02:40*", "+750", "Resets"):
+        assert text in embed.description
+    assert "Current members only" not in embed.description  # that note is for the club view
+
+
+def test_command_can_look_up_another_user(world):
+    two_members_for_a_morning(world)
+    world.service.link("222", "B")
+    (embed,) = cmd_fan_gain_history(world.service, None, "today", "111", "222").embeds
+    assert embed.title.startswith("Bob · ") and "+550" in embed.description
+
+
+def test_command_says_when_the_member_joined_today(world):
+    world.at("2026-11-04 00:05").roster({"A": ("Alice", 1000)}).sync()
+    world.at("2026-11-04 02:05").roster({"A": ("Alice", 1200), "B": ("Bob", 5000)}).sync()
+    world.service.link("222", "B")
+    (embed,) = cmd_fan_gain_history(world.service, None, "today", "222").embeds
+    assert "Joined during this day" in embed.description and "```" not in embed.description
+
+
+def test_command_member_errors(world):
+    two_members_for_a_morning(world)
+    assert "haven't linked" in cmd_fan_gain_history(world.service, None, "today", "999").content
+    assert "hasn't linked" in cmd_fan_gain_history(world.service, None, "today", "111", "999").content
+    both = cmd_fan_gain_history(world.service, "club1", "today", "111", "222")
+    assert both.ephemeral and "not both" in both.content
+    assert cmd_fan_gain_history(world.service, None).ephemeral  # nothing to go on
+
+
+def test_member_yesterday_works_too(world):
+    world.at("2026-11-04 00:05").roster({"A": ("Alice", 100)}).sync()
+    world.at("2026-11-04 12:05").roster({"A": ("Alice", 400)}).sync()
+    world.at("2026-11-05 00:05").roster({"A": ("Alice", 460)}).sync()
+    world.at("2026-11-05 12:30")
+    view = member_history(world, "A", "yesterday")
+    assert summary(view.history) == [("12:00", 12, 300, 300, False), ("00:00", 12, 60, 360, False)]
