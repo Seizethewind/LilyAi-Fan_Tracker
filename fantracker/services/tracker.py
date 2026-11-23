@@ -11,9 +11,10 @@ import re
 import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fantracker.config import ClubConfig
+from fantracker.hourly import DAYS, HourlyHistory, build_history
 from fantracker.models import ClubInfo, StandingRow, SyncOutcome, SyncResult
 from fantracker.sources.base import FanSource, SourceError
 from fantracker.storage import DatabaseError, Store
@@ -55,6 +56,15 @@ class Standing:
     period: str
     row: StandingRow
     roster_size: int
+    info: ClubInfo
+    resets_at: datetime
+
+
+@dataclass(frozen=True)
+class HourlyView:
+    club: ClubConfig
+    day: str  # today | yesterday
+    history: HourlyHistory
     info: ClubInfo
     resets_at: datetime
 
@@ -134,6 +144,23 @@ class TrackerService:
         if row is None:
             return None
         return Standing(club, period, row, len(rows), self.store.club_info(club.club_id), next_reset(period, now))
+
+    def fan_gain_history(self, club: ClubConfig, day: str = "today") -> HourlyView:
+        """The club's fan gain hour by hour: today since the 00:00 UTC reset, or all of yesterday."""
+        if day not in DAYS:
+            raise ValueError(f"day must be one of {', '.join(DAYS)}")
+        now = self._clock()
+        resets_at = next_reset("daily", now)
+        today_start = resets_at - timedelta(days=1)
+        info = self.store.club_info(club.club_id)
+        if day == "yesterday":
+            start, end = today_start - timedelta(days=1), today_start
+            current, live_time = None, end
+        else:
+            start, end = today_start, resets_at
+            current, live_time = self.store.current_fans(club.club_id), info.last_synced_at or now
+        rows = self.store.hour_rows(club.club_id, start, end)
+        return HourlyView(club, day, build_history(rows, current, start, end, live_time), info, resets_at)
 
     # ---- discord links -------------------------------------------------
 
