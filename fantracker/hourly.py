@@ -41,6 +41,7 @@ class HourlyHistory:
     day_end: datetime  # the next reset
     lines: tuple[HourLine, ...]
     first_mark: datetime | None  # earliest stored hour found; None when nothing is stored yet
+    counted: bool = True  # False when one member was asked for but joined after the first stored hour
 
     @property
     def total(self) -> int:
@@ -58,9 +59,11 @@ def build_history(
     day_start: datetime,
     day_end: datetime,
     live_time: datetime,
+    only: str | None = None,
 ) -> HourlyHistory:
     """rows: (trainer_id, hour, fans) of current members. current: their latest totals, or None
-    for a finished day (no live line)."""
+    for a finished day (no live line). only: a trainer ID to show one member instead of the club;
+    the same rules apply, and `counted` is False if they were not there at the first stored hour."""
     by_member: dict[str, dict[datetime, int]] = {}
     for trainer_id, mark, fans in rows:
         by_member.setdefault(trainer_id, {})[mark] = fans
@@ -71,6 +74,10 @@ def build_history(
     first = marks[0]
     # The members counted: those stored at the first hour. Value = their latest known total.
     previous = {trainer_id: per[first] for trainer_id, per in by_member.items() if first in per}
+    if only is not None:
+        if only not in previous:
+            return HourlyHistory(day_start, day_end, (), first, counted=False)
+        previous = {only: previous[only]}
     lines: list[HourLine] = []
     running = 0
     last_mark = first

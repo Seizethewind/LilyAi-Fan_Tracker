@@ -100,20 +100,30 @@ def register_commands(tree: app_commands.CommandTree, service: TrackerService) -
             ephemeral=False,
         )
 
-    @tree.command(name="fan_gain_history", description="Club fan gain hour by hour since the 00:00 UTC reset")
-    @app_commands.describe(club="Which club", day="Today since the reset, or all of yesterday")
+    @tree.command(
+        name="fan_gain_history",
+        description="Hourly fan gain since 00:00 UTC for a club, or for you or another user",
+    )
+    @app_commands.describe(
+        club="A club's total (leave empty to see a trainer instead)",
+        day="Today since the reset, or all of yesterday",
+        user="Another user's hourly gain (leave empty for yourself)",
+    )
     @app_commands.choices(club=club_choices, day=day_choices)
     async def fan_gain_history(
         interaction: discord.Interaction,
-        club: app_commands.Choice[str],
+        club: app_commands.Choice[str] | None = None,
         day: app_commands.Choice[str] | None = None,
+        user: discord.User | None = None,
     ):
         await _run(
             interaction,
             cmd.cmd_fan_gain_history,
             service,
-            club.value,
+            club.value if club else None,
             day.value if day else "today",
+            str(interaction.user.id),
+            str(user.id) if user else None,
             ephemeral=False,
         )
 
