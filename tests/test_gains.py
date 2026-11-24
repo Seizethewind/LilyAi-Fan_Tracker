@@ -266,3 +266,29 @@ def test_a_member_promoted_to_another_club_keeps_their_baseline(world):
     assert world.gain("T", "weekly") == (560, True)  # Wed in Club 2, then Club 1, one running total
     assert world.gain("T", "monthly") == (560, True)
     assert world.service.standing_for_trainer("T", "monthly").club.key == "club1"
+
+
+def test_a_promoted_member_still_listed_by_the_old_club_counts_only_in_the_new_one(world):
+    """uma.moe keeps listing a member in the club they left, with a frozen row. The fresher row wins."""
+    other = ("Other", 10)
+    world.at("2026-11-03 15:05").roster({"A": ("Alice", 100)})
+    world.roster({"T": ("Tina", 1000, "2026-11-03T15:00:00Z"), "900": other}, club=CLUB2).sync()
+    world.at("2026-11-04 03:00").roster({"A": ("Alice", 120)})
+    world.roster({"T": ("Tina", 1300, "2026-11-04T03:00:00Z"), "900": other}, club=CLUB2).sync()
+
+    # Promoted at 09:00. Club 2 still lists Tina, frozen at 1300; Club 1 lists her live.
+    for hour, fans in (("09:00", 1500), ("12:00", 1560)):
+        world.at(f"2026-11-04 {hour}").roster({"A": ("Alice", 130), "T": ("Tina", fans, f"2026-11-04T{hour}:00Z")})
+        world.roster({"T": ("Tina", 1300, "2026-11-04T03:00:00Z"), "900": other}, club=CLUB2).sync()
+
+    assert world.on_roster(CLUB2) == ["900"]  # not listed as a +0 member of Club 2
+    assert sorted(world.on_roster(CLUB1)) == ["A", "T"]
+    for period in ("daily", "weekly", "monthly"):
+        assert world.gain("T", period) == (560, True)
+    assert world.service.standing_for_trainer("T", "daily").club.key == "club1"
+
+
+def test_equal_or_missing_timestamps_keep_a_trainer_in_both_clubs(world):
+    world.roster({"T": ("Tina", 100)})
+    world.roster({"T": ("Tina", 100), "900": ("Other", 10)}, club=CLUB2).sync()
+    assert world.on_roster(CLUB1) == ["T"] and world.on_roster(CLUB2) == ["T", "900"]
