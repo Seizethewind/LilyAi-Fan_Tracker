@@ -11,6 +11,7 @@ class SourceMember:
     trainer_id: str
     name: str
     fans: int
+    updated: str | None = None  # ISO 8601 UTC time the source last refreshed this row
 
 
 @dataclass(frozen=True)

@@ -28,7 +28,7 @@ def utc(text: str) -> datetime:
 
 class FakeSource:
     def __init__(self) -> None:
-        self.rosters: dict[str, dict[str, tuple[str, int]]] = {}
+        self.rosters: dict[str, dict[str, tuple]] = {}
         self.errors: dict[str, Exception] = {}
 
     def set(self, club_id: str, members: dict[str, tuple[str, int]]) -> None:
@@ -39,7 +39,8 @@ class FakeSource:
             raise self.errors[club_id]
         if club_id not in self.rosters:
             raise SourceError("no such club in the fake source")
-        members = [SourceMember(t, name, fans) for t, (name, fans) in self.rosters[club_id].items()]
+        # (name, fans) or (name, fans, last_updated)
+        members = [SourceMember(t, v[0], v[1], v[2] if len(v) > 2 else None) for t, v in self.rosters[club_id].items()]
         return ClubSnapshot(club_id, members, club_name=f"Real name of {club_id}")
 
 

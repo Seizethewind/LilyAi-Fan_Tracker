@@ -78,7 +78,9 @@ def parse_circle_response(payload: Any, club_id: str) -> ClubSnapshot:
             continue  # no fan total yet this month; it appears once uma.moe has one
         name = row.get("trainer_name")
         name = name.strip() if isinstance(name, str) and name.strip() else trainer_id
-        members.append(SourceMember(trainer_id=trainer_id, name=name, fans=fans))
+        stamp = row.get("last_updated")
+        updated = stamp if isinstance(stamp, str) else None
+        members.append(SourceMember(trainer_id=trainer_id, name=name, fans=fans, updated=updated))
 
     if not members:
         # An empty roster would make the tracker think everyone left, so fail the sync instead.

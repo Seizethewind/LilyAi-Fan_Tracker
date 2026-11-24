@@ -202,3 +202,11 @@ def test_build_source_returns_the_client_when_a_key_is_set():
 def test_build_source_without_a_key_is_a_clear_error():
     with pytest.raises(SourceError, match="UMAMOE_API_KEY"):
         build_source(load_settings({}))
+
+
+def test_parse_keeps_each_rows_last_updated():
+    payload = copy.deepcopy(CIRCLE_RESPONSE)
+    payload["members"][0]["last_updated"] = "2026-11-24T10:21:47Z"
+    by_id = {m.trainer_id: m for m in parse_circle_response(payload, "974470619").members}
+    assert by_id["111111111"].updated == "2026-11-24T10:21:47Z"
+    assert by_id["222222222"].updated is None
