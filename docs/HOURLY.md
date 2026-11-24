@@ -60,6 +60,8 @@ summed over the club (when history covers the whole day). A test checks this.
 - **Only current members count.** Someone who left never appears, even for hours before they left.
 - **Joiners count from the next game day**, the same as the daily gain. Only members already
   present at the first stored hour of the day are counted.
+- **Moving between clubs keeps the hours.** Someone promoted from Club 2 to Club 1 counts in Club 1
+  with the hours already stored under Club 2, so Club 1's total still matches the daily gain.
 - **Missed hours are not invented.** If the bot was off for a while, the next stored hour carries
   the whole gap and is marked like `04:00 (3h)`.
 - **The `*` line** is the hour still in progress, worked out from the latest sync when you run the

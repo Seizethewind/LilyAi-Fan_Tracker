@@ -26,6 +26,8 @@ process, and a self-pinger requests the service's own `/health` every 300 second
   starts on Wednesday the 1st. A week never spans two months.
 - **Join day counts as 0.** Gains compute normally from the next game day.
 - Members who leave are removed from the roster.
+- **Moving between clubs keeps the gain.** Someone promoted from Club 2 to Club 1 keeps the fans already
+  earned this period instead of restarting at 0.
 - Leaving and rejoining in the **same month** keeps the original baseline. Rejoining in a **later month** counts as a new player.
 - Data refreshes every 5 minutes. Commands read saved data and never call uma.moe directly.
 - Tables show at most 30 rows per club.
