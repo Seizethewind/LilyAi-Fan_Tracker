@@ -3,10 +3,13 @@
 MOCKED: a fake data source and an in-memory SQLite database. Passing tests prove the logic,
 not that uma.moe, Discord or Turso behave the same in a real deployment.
 
-Calendar used: 2026-11-04 is a Wednesday.
+Calendar used: 2026-11-04 is a Wednesday. Its game day starts at 15:00 UTC on 2026-11-03 (00:00 JST),
+so the hourly lines carry UTC times from 16:00 on.
 """
 
 from __future__ import annotations
+
+from datetime import timedelta
 
 from fantracker.commands import cmd_fan_gain_history
 from fantracker.hourly import build_history, hourly_table
@@ -27,10 +30,10 @@ def summary(h):
 
 
 def two_members_for_a_morning(world):
-    world.at("2026-11-04 00:05").roster({"A": ("Alice", 1000), "B": ("Bob", 2000)}).sync()
-    world.at("2026-11-04 01:05").roster({"A": ("Alice", 1300), "B": ("Bob", 2200)}).sync()
-    world.at("2026-11-04 02:05").roster({"A": ("Alice", 1700), "B": ("Bob", 2500)}).sync()
-    world.at("2026-11-04 02:40").roster({"A": ("Alice", 1750), "B": ("Bob", 2550)}).sync()
+    world.at("2026-11-03 15:05").roster({"A": ("Alice", 1000), "B": ("Bob", 2000)}).sync()
+    world.at("2026-11-03 16:05").roster({"A": ("Alice", 1300), "B": ("Bob", 2200)}).sync()
+    world.at("2026-11-03 17:05").roster({"A": ("Alice", 1700), "B": ("Bob", 2500)}).sync()
+    world.at("2026-11-03 17:40").roster({"A": ("Alice", 1750), "B": ("Bob", 2550)}).sync()
 
 
 def test_hour_mark_is_the_flat_utc_hour():
@@ -41,9 +44,9 @@ def test_lines_are_hourly_gains_and_the_total_is_not_counted_twice(world):
     two_members_for_a_morning(world)
     h = history(world)
     assert summary(h) == [
-        ("01:00", 1, 500, 500, False),
-        ("02:00", 1, 700, 1200, False),
-        ("02:40", 0, 100, 1300, True),  # the hour still in progress
+        ("16:00", 1, 500, 500, False),
+        ("17:00", 1, 700, 1200, False),
+        ("17:40", 0, 100, 1300, True),  # the hour still in progress
     ]
     assert not h.starts_late
     # Three ways to the same number: the last "since reset", the sum of the lines, the daily gain.
@@ -106,13 +109,13 @@ def test_history_that_starts_mid_day_says_so(world):
 
 
 def test_yesterday_is_a_full_day_with_the_last_hour_stored_at_the_reset(world):
-    world.at("2026-11-04 00:05").roster({"A": ("Alice", 100)}).sync()
-    world.at("2026-11-04 12:05").roster({"A": ("Alice", 400)}).sync()
-    world.at("2026-11-05 00:05").roster({"A": ("Alice", 460)}).sync()
-    world.at("2026-11-05 12:30")
+    world.at("2026-11-03 15:05").roster({"A": ("Alice", 100)}).sync()  # first sync of Wed 4 Nov
+    world.at("2026-11-04 03:05").roster({"A": ("Alice", 400)}).sync()
+    world.at("2026-11-04 15:05").roster({"A": ("Alice", 460)}).sync()  # first sync of Thu 5 Nov
+    world.at("2026-11-04 15:30")
     h = history(world, day="yesterday")
-    assert summary(h) == [("12:00", 12, 300, 300, False), ("00:00", 12, 60, 360, False)]
-    assert "24:00 (12h)" in hourly_table(h)  # the 24th line, stored when the reset happened
+    assert summary(h) == [("03:00", 12, 300, 300, False), ("15:00", 12, 60, 360, False)]
+    assert "15:00 (12h)" in hourly_table(h)  # the last line, stored when the reset happened
     assert not any(line.live for line in h.lines)
 
 
@@ -125,13 +128,13 @@ def test_old_hourly_rows_are_deleted_after_eight_days(world):
 
 def test_a_whole_day_of_hourly_syncs_adds_up_to_the_daily_gain(world):
     fans = {"A": 1000, "B": 2000, "C": 3000}
-    for hour in range(0, 24):
-        for minute in (5, 35):
+    opening = utc("2026-11-03 15:05")  # the first sync of game day Wed 4 Nov
+    for hour in range(24):
+        for minute in (0, 30):
             for who, step in (("A", 10), ("B", 25), ("C", 7)):
                 fans[who] += step * (hour + 1)
-            world.at(f"2026-11-04 {hour:02d}:{minute:02d}").roster(
-                {"A": ("Alice", fans["A"]), "B": ("Bob", fans["B"]), "C": ("Cara", fans["C"])}
-            ).sync()
+            world.now = opening + timedelta(hours=hour, minutes=minute)
+            world.roster({"A": ("Alice", fans["A"]), "B": ("Bob", fans["B"]), "C": ("Cara", fans["C"])}).sync()
     h = history(world)
     assert len(h.lines) == 24  # 23 stored hours plus the live line
     assert h.total == sum(line.gain for line in h.lines) == daily_total(world)
@@ -139,10 +142,10 @@ def test_a_whole_day_of_hourly_syncs_adds_up_to_the_daily_gain(world):
 
 
 def test_table_labels_missed_hours_and_the_day_end():
-    start, end = utc("2026-11-04 00:00"), utc("2026-11-05 00:00")
-    rows = [("A", start, 100), ("A", utc("2026-11-04 03:00"), 400), ("A", end, 460)]
+    start, end = utc("2026-11-03 15:00"), utc("2026-11-04 15:00")
+    rows = [("A", start, 100), ("A", utc("2026-11-03 18:00"), 400), ("A", end, 460)]
     table = hourly_table(build_history(rows, None, start, end, end))
-    assert "03:00 (3h)" in table and "24:00 (21h)" in table
+    assert "18:00 (3h)" in table and "15:00 (21h)" in table
     assert table.splitlines()[-2].endswith("+360") and "Total" in table.splitlines()[-2]
 
 
@@ -150,8 +153,8 @@ def test_command_shows_the_table_total_and_footer(world):
     two_members_for_a_morning(world)
     reply = cmd_fan_gain_history(world.service, "club1")
     (embed,) = reply.embeds
-    assert embed.title == "Club 1 · Hourly fan gain · Wed 04 Nov (UTC)"
-    for text in ("01:00", "+500", "02:00", "+1,200", "02:40*", "Total", "+1,300", "still in progress", "Resets"):
+    assert embed.title == "Club 1 · Hourly fan gain · Wed 04 Nov"  # the game day, not the UTC date
+    for text in ("16:00", "+500", "17:00", "+1,200", "17:40*", "Total", "+1,300", "still in progress", "Resets"):
         assert text in embed.description
 
 
@@ -182,9 +185,9 @@ def test_one_members_lines_use_only_their_own_totals(world):
     two_members_for_a_morning(world)
     a = member_history(world, "A").history
     assert summary(a) == [
-        ("01:00", 1, 300, 300, False),
-        ("02:00", 1, 400, 700, False),
-        ("02:40", 0, 50, 750, True),
+        ("16:00", 1, 300, 300, False),
+        ("17:00", 1, 400, 700, False),
+        ("17:40", 0, 50, 750, True),
     ]
     assert member_history(world, "A").trainer_name == "Alice"
     assert a.total == world.gain("A", "daily")[0] == 750  # the same number /fan_gain shows
@@ -216,8 +219,8 @@ def test_command_shows_your_own_hours_when_you_pick_nothing(world):
     two_members_for_a_morning(world)
     world.service.link("111", "A")
     (embed,) = cmd_fan_gain_history(world.service, None, "today", "111").embeds
-    assert embed.title == "Alice · Hourly fan gain · Wed 04 Nov (UTC)"
-    for text in ("Club 1", "01:00", "+300", "+700", "02:40*", "+750", "Resets"):
+    assert embed.title == "Alice · Hourly fan gain · Wed 04 Nov"
+    for text in ("Club 1", "16:00", "+300", "+700", "17:40*", "+750", "Resets"):
         assert text in embed.description
     assert "Current members only" not in embed.description  # that note is for the club view
 
@@ -247,9 +250,9 @@ def test_command_member_errors(world):
 
 
 def test_member_yesterday_works_too(world):
-    world.at("2026-11-04 00:05").roster({"A": ("Alice", 100)}).sync()
-    world.at("2026-11-04 12:05").roster({"A": ("Alice", 400)}).sync()
-    world.at("2026-11-05 00:05").roster({"A": ("Alice", 460)}).sync()
-    world.at("2026-11-05 12:30")
+    world.at("2026-11-03 15:05").roster({"A": ("Alice", 100)}).sync()
+    world.at("2026-11-04 03:05").roster({"A": ("Alice", 400)}).sync()
+    world.at("2026-11-04 15:05").roster({"A": ("Alice", 460)}).sync()
+    world.at("2026-11-04 15:30")
     view = member_history(world, "A", "yesterday")
-    assert summary(view.history) == [("12:00", 12, 300, 300, False), ("00:00", 12, 60, 360, False)]
+    assert summary(view.history) == [("03:00", 12, 300, 300, False), ("15:00", 12, 60, 360, False)]
