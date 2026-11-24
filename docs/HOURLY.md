@@ -1,14 +1,14 @@
 # Hourly fan gain history
 
 `/fan_gain_history` shows a club's fan gain hour by hour, from the last daily reset
-(00:00 UTC) up to now.
+(15:00 UTC) up to now. The title shows the game day (the JST date); the time column is UTC.
 
 ```
-Club 1 · Hourly fan gain · Wed 04 Nov (UTC)
+Club 1 · Hourly fan gain · Wed 04 Nov
 UTC     This hour  Since reset
-01:00    +500,000     +500,000
-02:00    +600,000   +1,100,000
-02:40*   +150,000   +1,250,000
+16:00    +500,000     +500,000
+17:00    +600,000   +1,100,000
+17:40*   +150,000   +1,250,000
 Total               +1,250,000
 ```
 
@@ -19,25 +19,25 @@ Total               +1,250,000
   linked trainer ID (`/link`), the same as `/fan_gain`.
 - **neither**: shows your own hourly gain (you need to have used `/link`).
 - **day**: `Today` (default) or `Yesterday`. Yesterday is the full 24 hours; its last line is
-  stored at the reset and labelled `24:00`.
+  stored at the reset and labelled `15:00`.
 
 Pick a club **or** a user, not both.
 
 ## One trainer's view
 
 ```
-Alice · Hourly fan gain · Wed 04 Nov (UTC)
+Alice · Hourly fan gain · Wed 04 Nov
 Club: Club 1
 UTC     This hour  Since reset
-01:00     +300,000     +300,000
-02:00     +400,000     +700,000
-02:40*     +50,000     +750,000
+16:00     +300,000     +300,000
+17:00     +400,000     +700,000
+17:40*     +50,000     +750,000
 Total                  +750,000
 ```
 
 It uses the same stored hourly totals, the same lines and the same rules, counting only that
 trainer. The Total is the same number `/fan_gain` shows for the day, and the trainers' totals add up
-to the club's. A trainer who joined during the day has no hourly gains until the next UTC day (the
+to the club's. A trainer who joined during the day has no hourly gains until the next game day (the
 command says so), and a trainer who has left has no history.
 
 ## What is stored
@@ -58,7 +58,7 @@ summed over the club (when history covers the whole day). A test checks this.
 ## Rules
 
 - **Only current members count.** Someone who left never appears, even for hours before they left.
-- **Joiners count from the next UTC day**, the same as the daily gain. Only members already
+- **Joiners count from the next game day**, the same as the daily gain. Only members already
   present at the first stored hour of the day are counted.
 - **Missed hours are not invented.** If the bot was off for a while, the next stored hour carries
   the whole gap and is marked like `04:00 (3h)`.

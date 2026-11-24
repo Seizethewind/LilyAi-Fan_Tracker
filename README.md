@@ -19,8 +19,12 @@ process, and a self-pinger requests the service's own `/health` every 300 second
 
 ## Rules
 
-- All resets use **UTC** (game time): daily at 00:00, weekly on **Monday** 00:00, monthly on the 1st.
-- **Join day counts as 0.** Gains compute normally from the next UTC day.
+- Every reset happens at **15:00 UTC** (00:00 JST), when the game and uma.moe reset their own tallies.
+- **Daily** is one game day. **Monthly** is the whole month's total, from the 1st until the next month's reset.
+- **Weekly** runs Monday to Sunday (the Monday reset is Sunday 15:00 UTC), but a month end cuts it short:
+  the new month starts a new week. If a month ends on a Tuesday, that week stops there and the next one
+  starts on Wednesday the 1st. A week never spans two months.
+- **Join day counts as 0.** Gains compute normally from the next game day.
 - Members who leave are removed from the roster.
 - Leaving and rejoining in the **same month** keeps the original baseline. Rejoining in a **later month** counts as a new player.
 - Data refreshes every 5 minutes. Commands read saved data and never call uma.moe directly.
@@ -61,7 +65,7 @@ See [docs/API.md](docs/API.md).
 
 ```
 fantracker/
-  config.py, timeutil.py     settings, UTC period boundaries
+  config.py, timeutil.py     settings, period boundaries (15:00 UTC)
   storage/                   SQLite and Turso backends, all SQL in store.py
   sources/                   data source interface (uma.moe client goes here)
   services/tracker.py        sync and query logic, shared by Discord and the API
