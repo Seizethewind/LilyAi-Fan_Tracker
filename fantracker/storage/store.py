@@ -14,6 +14,8 @@ That one rule produces the behaviour the project asked for:
   and month's gain) is 0. From the next game day they have a snapshot and
   gains compute normally.
 * Leaving removes the member from the roster (active = 0). Snapshots stay.
+* Moving to the other club keeps the baseline: snapshots are matched by trainer, whichever club
+  stored them, so someone promoted from Club 2 to Club 1 keeps the gain they already earned.
 * Rejoining in the same month finds their older snapshots, so the original
   baseline is restored. Rejoining in a later month finds none for the new
   month, so they start over like a new player.
@@ -79,18 +81,19 @@ SCHEMA = (
 STANDINGS_SQL = """
 SELECT m.trainer_id, m.name, m.fans,
        (SELECT s.fans FROM day_snapshots s
-         WHERE s.club_id = m.club_id AND s.trainer_id = m.trainer_id AND s.day >= ?
-         ORDER BY s.day ASC LIMIT 1) AS baseline
+         WHERE s.trainer_id = m.trainer_id AND s.day >= ?
+         ORDER BY s.day ASC, (s.club_id = ?) DESC LIMIT 1) AS baseline
 FROM members m
 WHERE m.club_id = ? AND m.active = 1
 """
 
-# Only members on the roster now: someone who left never appears in the hourly history.
+# Only members on the roster now: someone who left never appears in the hourly history. A member who
+# moved here from the other club brings the hours that club stored for them.
 HOUR_ROWS_SQL = """
 SELECT h.trainer_id, h.hour, h.fans
 FROM hour_snapshots h
-JOIN members m ON m.club_id = h.club_id AND m.trainer_id = h.trainer_id AND m.active = 1
-WHERE h.club_id = ? AND h.hour >= ? AND h.hour <= ?
+JOIN members m ON m.trainer_id = h.trainer_id AND m.club_id = ? AND m.active = 1
+WHERE h.hour >= ? AND h.hour <= ?
 ORDER BY h.hour ASC
 """
 
@@ -238,7 +241,7 @@ class Store:
     def standings(self, club_id: str, period: str, now: datetime) -> list[StandingRow]:
         start = period_start_day(period, now).isoformat()
         scored = []
-        for trainer_id, name, fans, baseline in self.db.execute(STANDINGS_SQL, (start, club_id)):
+        for trainer_id, name, fans, baseline in self.db.execute(STANDINGS_SQL, (start, club_id, club_id)):
             fans = int(fans)
             base = None if baseline is None else int(baseline)
             scored.append((compute_gain(fans, base), fans, name, trainer_id, base is not None))

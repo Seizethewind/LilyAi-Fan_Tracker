@@ -14,7 +14,7 @@ from datetime import timedelta
 from fantracker.commands import cmd_fan_gain_history
 from fantracker.hourly import build_history, hourly_table
 from fantracker.storage.store import hour_mark
-from tests.conftest import CLUB1, utc
+from tests.conftest import CLUB1, CLUB2, utc
 
 
 def history(world, club=CLUB1, day="today"):
@@ -256,3 +256,20 @@ def test_member_yesterday_works_too(world):
     world.at("2026-11-04 15:30")
     view = member_history(world, "A", "yesterday")
     assert summary(view.history) == [("03:00", 12, 300, 300, False), ("15:00", 12, 60, 360, False)]
+
+
+def test_a_member_promoted_mid_day_keeps_their_hours_and_the_totals_still_match(world):
+    other = ("Other", 10)
+    world.at("2026-11-03 15:05").roster({"A": ("Alice", 1000)})
+    world.roster({"T": ("Tina", 5000), "900": other}, club=CLUB2).sync()  # first sync of Wed 4 Nov
+    world.at("2026-11-03 16:05").roster({"A": ("Alice", 1100)})
+    world.roster({"T": ("Tina", 5300), "900": other}, club=CLUB2).sync()
+    world.at("2026-11-03 17:40").roster({"A": ("Alice", 1200), "T": ("Tina", 5500)})
+    world.roster({"900": other}, club=CLUB2).sync()  # Tina is promoted to Club 1
+    world.at("2026-11-03 18:05").roster({"A": ("Alice", 1250), "T": ("Tina", 5700)}).sync()
+    h = history(world)
+    assert [line.gain for line in h.lines] == [400, 300, 250, 0]  # Tina's hours in Club 2 count too
+    assert h.total == daily_total(world) == 950
+    tina = member_history(world, "T").history
+    assert tina.counted and tina.total == world.gain("T", "daily")[0] == 700
+    assert history(world, CLUB2).total == 0  # she is not in Club 2 any more, so she is not in its total
