@@ -243,3 +243,26 @@ def test_a_week_cut_by_the_month_end_stops_there(world):
     world.at("2026-04-05 15:05").roster({"A": ("Alice", 300)}).sync()  # Mon 6 Apr: a normal Monday reset
     assert world.gain("A", "weekly") == (0, True)
     assert world.gain("A", "monthly") == (80, True)
+
+
+def test_a_member_promoted_to_another_club_keeps_their_baseline(world):
+    """Club 2 to Club 1: the fans already earned this period still count. Nothing resets to 0."""
+    other = ("Other", 10)
+    world.at("2026-11-03 15:05").roster({"A": ("Alice", 100)})
+    world.roster({"T": ("Tina", 1000), "900": other}, club=CLUB2).sync()  # first sync of Wed 4 Nov
+    world.at("2026-11-04 03:00").roster({"A": ("Alice", 120)})
+    world.roster({"T": ("Tina", 1300), "900": other}, club=CLUB2).sync()
+    assert world.gain("T", "daily", CLUB2) == (300, True)
+
+    world.at("2026-11-04 09:00").roster({"A": ("Alice", 130), "T": ("Tina", 1500)})
+    world.roster({"900": other}, club=CLUB2).sync()  # Tina is promoted
+    assert world.on_roster(CLUB2) == ["900"]
+    for period in ("daily", "weekly", "monthly"):
+        assert world.gain("T", period) == (500, True)  # all of it, not 0
+
+    world.at("2026-11-04 15:05").roster({"A": ("Alice", 130), "T": ("Tina", 1500)}).sync()  # Thu 5 Nov
+    world.at("2026-11-05 03:00").roster({"A": ("Alice", 140), "T": ("Tina", 1560)}).sync()
+    assert world.gain("T", "daily") == (60, True)
+    assert world.gain("T", "weekly") == (560, True)  # Wed in Club 2, then Club 1, one running total
+    assert world.gain("T", "monthly") == (560, True)
+    assert world.service.standing_for_trainer("T", "monthly").club.key == "club1"
