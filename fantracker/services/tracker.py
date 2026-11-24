@@ -10,12 +10,12 @@ import logging
 import re
 import threading
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
 from fantracker.config import ClubConfig
 from fantracker.hourly import DAYS, HourlyHistory, build_history
-from fantracker.models import ClubInfo, StandingRow, SyncOutcome, SyncResult
+from fantracker.models import ClubInfo, ClubSnapshot, StandingRow, SyncOutcome
 from fantracker.sources.base import FanSource, SourceError
 from fantracker.storage import DatabaseError, Store
 from fantracker.timeutil import PERIODS, next_reset, utc_now
@@ -30,6 +30,29 @@ _TRAINER_ID = re.compile(r"[A-Za-z0-9_]{1,32}")
 def normalize_trainer_id(raw: str) -> str:
     """Drop the spaces and dashes people type when copying an ID."""
     return re.sub(r"[\s\-]", "", raw)
+
+
+def drop_stale_duplicates(snapshots: dict[str, ClubSnapshot]) -> dict[str, ClubSnapshot]:
+    """Keep a trainer listed by two clubs only in the club whose row was refreshed most recently.
+
+    uma.moe keeps listing someone in the club they left, with a frozen row, so a member who moved
+    from Club 2 to Club 1 shows in both. The row the game still updates is the club they are in.
+    A tie, or rows without a timestamp, changes nothing.
+    """
+    best: dict[str, tuple[str, list[str]]] = {}  # trainer -> (newest stamp, clubs with that stamp)
+    for key, snapshot in snapshots.items():
+        for member in snapshot.members:
+            stamp = member.updated or ""
+            top = best.get(member.trainer_id)
+            if top is None or stamp > top[0]:
+                best[member.trainer_id] = (stamp, [key])
+            elif stamp == top[0]:
+                top[1].append(key)
+    keep = {t: clubs for t, (_, clubs) in best.items()}
+    return {
+        key: replace(snapshot, members=[m for m in snapshot.members if key in keep[m.trainer_id]])
+        for key, snapshot in snapshots.items()
+    }
 
 
 @dataclass(frozen=True)
@@ -92,28 +115,44 @@ class TrackerService:
 
     # ---- syncing -------------------------------------------------------
 
-    def sync_club(self, club: ClubConfig) -> SyncResult:
-        with self._sync_lock:
-            snapshot = self.source.fetch_club(club.club_id)
-            if snapshot.club_id != club.club_id:
-                raise SourceError("the source returned a different club than requested")
-            if not snapshot.members:
-                raise SourceError("the source returned an empty roster; keeping the previous data")
-            return self.store.apply_sync(snapshot, self._clock())
+    def _fetch(self, club: ClubConfig) -> ClubSnapshot:
+        snapshot = self.source.fetch_club(club.club_id)
+        if snapshot.club_id != club.club_id:
+            raise SourceError("the source returned a different club than requested")
+        return snapshot
 
     def sync_all(self) -> list[SyncOutcome]:
         """Sync every club. One club failing never stops the others."""
-        outcomes: list[SyncOutcome] = []
-        for club in self.clubs:
-            try:
-                outcomes.append(SyncOutcome(club.key, True, result=self.sync_club(club)))
-            except (SourceError, DatabaseError) as exc:
-                logger.warning("Sync of %s failed: %s", club.key, exc)
-                outcomes.append(self._failed(club, str(exc)))
-            except Exception as exc:  # noqa: BLE001 - logged with traceback, reported without detail
-                logger.exception("Unexpected error while syncing %s", club.key)
-                outcomes.append(self._failed(club, f"unexpected error ({type(exc).__name__})"))
-        return outcomes
+        with self._sync_lock:
+            fetched: dict[str, ClubSnapshot] = {}
+            failed: dict[str, SyncOutcome] = {}
+            for club in self.clubs:
+                try:
+                    fetched[club.key] = self._fetch(club)
+                except (SourceError, DatabaseError) as exc:
+                    logger.warning("Sync of %s failed: %s", club.key, exc)
+                    failed[club.key] = self._failed(club, str(exc))
+                except Exception as exc:  # noqa: BLE001 - logged with traceback, reported without detail
+                    logger.exception("Unexpected error while syncing %s", club.key)
+                    failed[club.key] = self._failed(club, f"unexpected error ({type(exc).__name__})")
+            fetched = drop_stale_duplicates(fetched)
+            outcomes: list[SyncOutcome] = []
+            for club in self.clubs:
+                if club.key in failed:
+                    outcomes.append(failed[club.key])
+                    continue
+                try:
+                    snapshot = fetched[club.key]
+                    if not snapshot.members:
+                        raise SourceError("the source returned an empty roster; keeping the previous data")
+                    outcomes.append(SyncOutcome(club.key, True, result=self.store.apply_sync(snapshot, self._clock())))
+                except (SourceError, DatabaseError) as exc:
+                    logger.warning("Sync of %s failed: %s", club.key, exc)
+                    outcomes.append(self._failed(club, str(exc)))
+                except Exception as exc:  # noqa: BLE001 - logged with traceback, reported without detail
+                    logger.exception("Unexpected error while syncing %s", club.key)
+                    outcomes.append(self._failed(club, f"unexpected error ({type(exc).__name__})"))
+            return outcomes
 
     def _failed(self, club: ClubConfig, message: str) -> SyncOutcome:
         try:
