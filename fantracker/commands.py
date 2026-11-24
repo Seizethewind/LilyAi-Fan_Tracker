@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from fantracker.formatting import clean_name, format_int, freshness_line, leaderboard_table
 from fantracker.hourly import hourly_table
 from fantracker.services.tracker import MAX_TOP, TrackerService
-from fantracker.timeutil import PERIODS
+from fantracker.timeutil import PERIODS, game_day
 
 PERIOD_LABELS = {"daily": "Daily", "weekly": "Weekly", "monthly": "Monthly"}
 DAY_LABELS = {"today": "Today", "yesterday": "Yesterday"}
@@ -108,7 +108,7 @@ def cmd_fan_gain(
         f"**Fans:** {format_int(row.fans)}",
     ]
     if not row.has_baseline:
-        lines.append("_Joined during this period, so gains start counting from the next UTC day._")
+        lines.append("_Joined during this period, so gains start counting from the next game day._")
     lines.append(freshness_line(standing.info.last_synced_at, standing.resets_at))
     embed = EmbedData(
         title=f"{clean_name(row.name)} · {PERIOD_LABELS[period]} fan gain",
@@ -124,7 +124,7 @@ def _history_notes(history, *, club_total: bool) -> list[str]:
     if any(line.live for line in history.lines):
         notes.append("`*` the hour still in progress (not saved yet).")
     if club_total:
-        notes.append("_Current members only. New joiners count from the next UTC day._")
+        notes.append("_Current members only. New joiners count from the next game day._")
     return notes
 
 
@@ -148,7 +148,7 @@ def _club_history(service: TrackerService, club_choice: str, day: str) -> Reply:
             lines.append(freshness_line(view.info.last_synced_at, view.resets_at))
         embeds.append(
             EmbedData(
-                title=f"{club.label} · Hourly fan gain · {history.day_start:%a %d %b} (UTC)",
+                title=f"{club.label} · Hourly fan gain · {game_day(history.day_start):%a %d %b}",
                 description="\n".join(lines),
             )
         )
@@ -170,7 +170,7 @@ def _member_history(service: TrackerService, discord_id: str, looking_up_other: 
     history = view.history
     lines = [f"**Club:** {view.club.label}"]
     if not history.counted:
-        lines.append("_Joined during this day, so hourly gains start counting from the next UTC day._")
+        lines.append("_Joined during this day, so hourly gains start counting from the next game day._")
     else:
         lines.append(hourly_table(history))
         if history.lines:
@@ -181,7 +181,7 @@ def _member_history(service: TrackerService, discord_id: str, looking_up_other: 
     return Reply(
         embeds=[
             EmbedData(
-                title=f"{name} · Hourly fan gain · {history.day_start:%a %d %b} (UTC)",
+                title=f"{name} · Hourly fan gain · {game_day(history.day_start):%a %d %b}",
                 description="\n".join(lines),
             )
         ]
@@ -195,7 +195,7 @@ def cmd_fan_gain_history(
     discord_id: str | None = None,
     target_discord_id: str | None = None,
 ) -> Reply:
-    """Fan gain hour by hour since the 00:00 UTC reset (or all of yesterday).
+    """Fan gain hour by hour since the 15:00 UTC reset (or all of yesterday).
 
     A club picked: the club's total. A user picked, or nothing picked: that member's own hourly gain
     (yourself when nothing is picked), found through the linked trainer ID like `/fan_gain`.

@@ -37,7 +37,7 @@ class HourLine:
 
 @dataclass(frozen=True)
 class HourlyHistory:
-    day_start: datetime  # the reset this history counts from (00:00 UTC)
+    day_start: datetime  # the reset this history counts from (15:00 UTC)
     day_end: datetime  # the next reset
     lines: tuple[HourLine, ...]
     first_mark: datetime | None  # earliest stored hour found; None when nothing is stored yet
@@ -101,17 +101,17 @@ def build_history(
     return HourlyHistory(day_start, day_end, tuple(lines), first)
 
 
-def _label(line: HourLine, history: HourlyHistory) -> str:
+def _label(line: HourLine) -> str:
     if line.live:
         return f"{line.time:%H:%M}*"
-    text = "24:00" if line.time == history.day_end else f"{line.time:%H:%M}"
+    text = f"{line.time:%H:%M}"
     return f"{text} ({line.hours}h)" if line.hours > 1 else text
 
 
 def hourly_table(history: HourlyHistory) -> str:
     if not history.lines:
         return "No hourly data yet. It is saved at every full UTC hour, starting from the first update after one."
-    labels = [_label(line, history) for line in history.lines]
+    labels = [_label(line) for line in history.lines]
     gains = [f"+{format_int(line.gain)}" for line in history.lines]
     totals = [f"+{format_int(line.since_reset)}" for line in history.lines]
     total_text = f"+{format_int(history.total)}"
