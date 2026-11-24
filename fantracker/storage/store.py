@@ -3,15 +3,15 @@
 Gain model
 ----------
 `day_snapshots` holds each member's fan total as of the FIRST successful sync
-of each UTC day, for every member on the roster at that moment. The baseline
-for a period is the member's earliest snapshot on or after the period's first
-day. gain = current total - baseline.
+of each game day (it starts at 15:00 UTC), for every member on the roster at
+that moment. The baseline for a period is the member's earliest snapshot on or
+after the period's first day. gain = current total - baseline.
 
 That one rule produces the behaviour the project asked for:
 
 * Join day is 0: someone who appears after the day's first sync has no
   snapshot for that day, so today's gain (and, for a new joiner, the week's
-  and month's gain) is 0. From the next UTC day they have a snapshot and
+  and month's gain) is 0. From the next game day they have a snapshot and
   gains compute normally.
 * Leaving removes the member from the roster (active = 0). Snapshots stay.
 * Rejoining in the same month finds their older snapshots, so the original

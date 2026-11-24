@@ -102,7 +102,7 @@ def register_commands(tree: app_commands.CommandTree, service: TrackerService) -
 
     @tree.command(
         name="fan_gain_history",
-        description="Hourly fan gain since 00:00 UTC for a club, or for you or another user",
+        description="Hourly fan gain since the 15:00 UTC reset for a club, or for you or another user",
     )
     @app_commands.describe(
         club="A club's total (leave empty to see a trainer instead)",

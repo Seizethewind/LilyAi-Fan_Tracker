@@ -66,4 +66,4 @@ def leaderboard_table(rows: list[StandingRow], value_header: str = "Gain") -> st
 
 def freshness_line(last_synced_at: datetime | None, resets_at: datetime) -> str:
     updated = f"Updated {discord_ts(last_synced_at)}" if last_synced_at else "Data not loaded yet"
-    return f"{updated} · Resets {discord_ts(resets_at)} (00:00 UTC)"
+    return f"{updated} · Resets {discord_ts(resets_at)} (15:00 UTC)"

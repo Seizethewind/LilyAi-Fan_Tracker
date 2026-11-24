@@ -50,7 +50,7 @@ def test_leaderboard_single_club(world):
     assert embed.title == "Club 1 · Daily top 10"
     names = [line.split()[1] for line in embed.description.splitlines() if line[:2].strip().isdigit()]
     assert names == ["Bob", "Alice", "Cara"]
-    assert "Resets" in embed.description and "00:00 UTC" in embed.description
+    assert "Resets" in embed.description and "15:00 UTC" in embed.description
 
 
 def test_leaderboard_both_clubs_gives_one_embed_each(world):
@@ -91,7 +91,7 @@ def test_fan_gain_requires_a_link(world):
 
 def test_fan_gain_explains_join_day_zero(world):
     seeded(world)
-    world.at("2026-11-04 15:00").roster(
+    world.at("2026-11-04 14:00").roster(
         {"111": ("Alice", 130), "222": ("Bob", 190), "333": ("Cara", 110), "444": ("Newbie", 5000)}
     ).sync()
     cmd.cmd_link(world.service, "42", "444")

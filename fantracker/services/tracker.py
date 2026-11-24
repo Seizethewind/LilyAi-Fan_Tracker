@@ -148,7 +148,7 @@ class TrackerService:
         return Standing(club, period, row, len(rows), self.store.club_info(club.club_id), next_reset(period, now))
 
     def fan_gain_history(self, club: ClubConfig, day: str = "today") -> HourlyView:
-        """The club's fan gain hour by hour: today since the 00:00 UTC reset, or all of yesterday."""
+        """The club's fan gain hour by hour: today since the 15:00 UTC reset, or all of yesterday."""
         return self._hourly_view(club, day)
 
     def trainer_fan_gain_history(self, trainer_id: str, day: str = "today") -> HourlyView | None:
