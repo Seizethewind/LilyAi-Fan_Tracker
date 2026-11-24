@@ -82,7 +82,7 @@ STANDINGS_SQL = """
 SELECT m.trainer_id, m.name, m.fans,
        (SELECT s.fans FROM day_snapshots s
          WHERE s.trainer_id = m.trainer_id AND s.day >= ?
-         ORDER BY s.day ASC, (s.club_id = m.club_id) DESC LIMIT 1) AS baseline
+         ORDER BY s.day ASC, (s.club_id = ?) DESC LIMIT 1) AS baseline
 FROM members m
 WHERE m.club_id = ? AND m.active = 1
 """
@@ -241,7 +241,7 @@ class Store:
     def standings(self, club_id: str, period: str, now: datetime) -> list[StandingRow]:
         start = period_start_day(period, now).isoformat()
         scored = []
-        for trainer_id, name, fans, baseline in self.db.execute(STANDINGS_SQL, (start, club_id)):
+        for trainer_id, name, fans, baseline in self.db.execute(STANDINGS_SQL, (start, club_id, club_id)):
             fans = int(fans)
             base = None if baseline is None else int(baseline)
             scored.append((compute_gain(fans, base), fans, name, trainer_id, base is not None))
