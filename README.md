@@ -27,8 +27,10 @@ process, and a self-pinger requests the service's own `/health` every 300 second
 - **Join day counts as 0.** Gains compute normally from the next game day.
 - Members who leave are removed from the roster.
 - **Moving between clubs keeps the gain.** Someone promoted from Club 2 to Club 1 keeps the fans already
-  earned this period instead of restarting at 0. uma.moe keeps listing a member in the club they left,
-  so a trainer listed by both clubs counts only in the one whose row uma.moe refreshed most recently.
+  earned this period instead of restarting at 0. uma.moe keeps listing a member in the club they left, so
+  for a trainer listed by both clubs, or with a row not refreshed for 24 hours, the bot asks uma.moe which
+  circle the trainer is in now and keeps them only there. If uma.moe cannot say, the row refreshed most
+  recently wins.
 - Leaving and rejoining in the **same month** keeps the original baseline. Rejoining in a **later month** counts as a new player.
 - Data refreshes every 5 minutes. Commands read saved data and never call uma.moe directly.
 - Tables show at most 30 rows per club.

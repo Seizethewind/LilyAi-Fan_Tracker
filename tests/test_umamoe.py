@@ -210,3 +210,24 @@ def test_parse_keeps_each_rows_last_updated():
     by_id = {m.trainer_id: m for m in parse_circle_response(payload, "974470619").members}
     assert by_id["111111111"].updated == "2026-11-24T10:21:47Z"
     assert by_id["222222222"].updated is None
+
+
+def test_current_club_asks_by_viewer_id_and_reads_the_circle():
+    src, session = source(FakeResponse(200, CIRCLE_RESPONSE))
+    assert src.current_club("111111111") == "974470619"
+    assert session.calls[0]["params"] == {"viewer_id": "111111111"}
+    assert session.calls[0]["headers"]["X-API-Key"] == KEY
+
+
+@pytest.mark.parametrize(
+    "response",
+    [FakeResponse(404, {"error": "no", "status": 404}), FakeResponse(200, {}), FakeResponse(200, bad_json=True)],
+)
+def test_current_club_is_none_when_uma_moe_cannot_say(response):
+    src, _ = source(response)
+    assert src.current_club("111111111") is None
+
+
+def test_current_club_never_sends_a_non_numeric_id():
+    src, session = source(FakeResponse(200, CIRCLE_RESPONSE))
+    assert src.current_club("../x") is None and session.calls == []
