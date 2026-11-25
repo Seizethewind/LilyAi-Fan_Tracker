@@ -30,6 +30,8 @@ from fantracker.models import ClubSnapshot, SourceMember
 from fantracker.sources.base import SourceError
 
 logger = logging.getLogger(__name__)
+# Temporary diagnostic with member names, kept apart from the names-free roster summary above.
+diagnostics = logging.getLogger("fantracker.diagnostics")
 
 DEFAULT_BASE_URL = "https://uma.moe"
 CIRCLES_PATH = "/api/v4/circles"
@@ -113,6 +115,22 @@ def roster_summary(payload: dict[str, Any], snapshot: ClubSnapshot) -> tuple[tup
     return counts, text
 
 
+def daily_fans_sample(payload: dict[str, Any], top: int = 5) -> str:
+    """How the raw ``daily_fans`` arrays of the biggest members look, to check what the numbers mean.
+
+    Shows the member name, the number of days with a total, the first and the last two totals.
+    """
+    rows = []
+    for row in payload["members"]:
+        values = [v for v in row.get("daily_fans", []) if _is_int(v) and v > 0] if isinstance(row, dict) else []
+        if values:
+            rows.append((values[-1], str(row.get("trainer_name") or row.get("viewer_id")), values))
+    rows.sort(key=lambda r: -r[0])
+    return "; ".join(
+        f"{name}: days={len(values)} first={values[0]:,} last2={values[-2:]}" for _, name, values in rows[:top]
+    )
+
+
 def _http_error(response: Any) -> str:
     detail = ""
     try:
@@ -154,6 +172,7 @@ class UmaMoeSource:
         if last is None or last[0] != counts or now - last[1] >= SUMMARY_LOG_SECONDS:
             self._last_summary[snapshot.club_id] = (counts, now)
             logger.info(text)
+            diagnostics.info("uma.moe club %s top daily_fans: %s", snapshot.club_id, daily_fans_sample(payload))
 
     def _get(self, params: dict[str, str]) -> Any:
         """GET /api/v4/circles with the given query. Raises SourceError on any failure."""
