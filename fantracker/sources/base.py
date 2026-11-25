@@ -15,3 +15,7 @@ class FanSource(Protocol):
     def fetch_club(self, club_id: str) -> ClubSnapshot:
         """Blocking call. Raise SourceError on any failure."""
         ...
+
+    def current_club(self, trainer_id: str) -> str | None:
+        """The club the source says this trainer is in now, or None when it cannot tell."""
+        ...

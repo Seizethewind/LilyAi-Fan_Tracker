@@ -30,6 +30,12 @@ class FakeSource:
     def __init__(self) -> None:
         self.rosters: dict[str, dict[str, tuple]] = {}
         self.errors: dict[str, Exception] = {}
+        self.where: dict[str, str] = {}  # trainer -> the club the source says they are in now
+        self.lookups: list[str] = []
+
+    def current_club(self, trainer_id: str) -> str | None:
+        self.lookups.append(trainer_id)
+        return self.where.get(trainer_id)
 
     def set(self, club_id: str, members: dict[str, tuple[str, int]]) -> None:
         self.rosters[club_id] = dict(members)

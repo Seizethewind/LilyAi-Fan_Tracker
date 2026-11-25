@@ -292,3 +292,67 @@ def test_equal_or_missing_timestamps_keep_a_trainer_in_both_clubs(world):
     world.roster({"T": ("Tina", 100)})
     world.roster({"T": ("Tina", 100), "900": ("Other", 10)}, club=CLUB2).sync()
     assert world.on_roster(CLUB1) == ["T"] and world.on_roster(CLUB2) == ["T", "900"]
+
+
+def promoted_but_listed_twice(world, **tweaks):
+    """Tina moved from Club 2 to Club 1 at 09:00 on Wed 4 Nov and both clubs still list her."""
+    other = ("Other", 10)
+    world.at("2026-11-03 15:05").roster({"A": ("Alice", 100)})
+    world.roster({"T": ("Tina", 1000, "2026-11-03T15:00:00Z"), "900": other}, club=CLUB2).sync()
+    world.at("2026-11-04 09:00")
+    world.roster({"A": ("Alice", 130), "T": ("Tina", 1500, tweaks.get("new", "2026-11-04T09:00:00Z"))})
+    world.roster({"T": ("Tina", 1300, tweaks.get("old", "2026-11-04T03:00:00Z")), "900": other}, club=CLUB2)
+    world.source.where["T"] = CLUB1.club_id
+    return world.sync()
+
+
+def test_the_source_decides_when_both_clubs_list_a_trainer_with_the_same_timestamp(world):
+    promoted_but_listed_twice(world, new="2026-11-04T09:00:00Z", old="2026-11-04T09:00:00Z")  # a tie
+    assert world.on_roster(CLUB2) == ["900"]
+    assert world.store.find_active_member("T")[0] == CLUB1.club_id
+    for period in ("daily", "weekly", "monthly"):
+        assert world.gain("T", period) == (500, True)
+
+
+def test_a_stale_row_is_dropped_when_the_source_says_the_trainer_is_elsewhere(world):
+    """Club 1 does not list Tina yet; Club 2's row is days old and the source says she is in Club 1."""
+    world.at("2026-11-03 15:05").roster({"A": ("Alice", 100)})
+    world.roster({"T": ("Tina", 1000, "2026-11-03T15:00:00Z"), "900": ("Other", 10)}, club=CLUB2).sync()
+    world.at("2026-11-07 09:00").roster({"A": ("Alice", 130)})
+    world.roster({"T": ("Tina", 1300, "2026-11-04T03:00:00Z"), "900": ("Other", 10)}, club=CLUB2)
+    world.source.where["T"] = CLUB1.club_id
+    world.sync()
+    assert world.on_roster(CLUB2) == ["900"]
+
+
+def test_a_stale_row_stays_when_the_source_says_the_trainer_is_still_there(world):
+    world.at("2026-11-07 09:00").roster({"A": ("Alice", 130)})
+    world.roster({"T": ("Tina", 1300, "2026-11-01T03:00:00Z"), "900": ("Other", 10)}, club=CLUB2)
+    world.source.where["T"] = CLUB2.club_id
+    world.sync()
+    assert sorted(world.on_roster(CLUB2)) == ["900", "T"]
+
+
+def test_a_trainer_in_a_club_we_do_not_track_is_dropped_from_both(world):
+    promoted_but_listed_twice(world)
+    world.source.where["T"] = "111222333"
+    world.at("2026-11-04 09:40").sync()  # past the half hour the first answer was kept for
+    assert world.on_roster(CLUB2) == ["900"] and world.on_roster(CLUB1) == ["A"]
+
+
+def test_when_the_source_cannot_tell_the_fresher_row_still_decides(world):
+    promoted_but_listed_twice(world)
+    del world.source.where["T"]
+    world.at("2026-11-04 09:40").sync()  # the first answer has expired, and the new one is "cannot tell"
+    assert world.on_roster(CLUB2) == ["900"]
+
+
+def test_only_doubtful_trainers_are_looked_up_and_answers_are_reused(world):
+    world.at("2026-11-04 09:00").roster({"A": ("Alice", 100, "2026-11-04T08:59:00Z")}).sync()
+    assert world.source.lookups == []  # fresh, listed once: nothing to ask
+    promoted_but_listed_twice(world)
+    assert world.source.lookups == ["T"]
+    world.at("2026-11-04 09:10").sync()
+    assert world.source.lookups == ["T"]  # reused within the half hour
+    world.at("2026-11-04 09:40").sync()
+    assert world.source.lookups == ["T", "T"]
