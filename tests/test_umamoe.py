@@ -14,7 +14,7 @@ import requests
 
 from fantracker.config import load_settings
 from fantracker.sources import SourceError, build_source
-from fantracker.sources.umamoe import UmaMoeSource, current_fans, parse_circle_response
+from fantracker.sources.umamoe import UmaMoeSource, current_fans, daily_fans_sample, parse_circle_response
 
 KEY = "test-secret-key"
 
@@ -231,3 +231,8 @@ def test_current_club_is_none_when_uma_moe_cannot_say(response):
 def test_current_club_never_sends_a_non_numeric_id():
     src, session = source(FakeResponse(200, CIRCLE_RESPONSE))
     assert src.current_club("../x") is None and session.calls == []
+
+
+def test_daily_fans_sample_shows_the_biggest_members_first():
+    sample = daily_fans_sample(CIRCLE_RESPONSE, top=2)
+    assert sample == "222222222: days=1 first=900 last2=[900]; Alice: days=3 first=100 last2=[250, 400]"
