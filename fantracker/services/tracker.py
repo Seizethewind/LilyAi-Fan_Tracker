@@ -55,6 +55,29 @@ def drop_stale_duplicates(snapshots: dict[str, ClubSnapshot]) -> dict[str, ClubS
     }
 
 
+STALE_AFTER = timedelta(hours=24)  # a row not refreshed for this long may belong to someone who left
+LOOKUP_TTL = timedelta(minutes=30)  # how long an answer about where a trainer is stays good
+
+
+def _is_stale(updated: str | None, now: datetime) -> bool:
+    try:
+        return updated is not None and now - datetime.fromisoformat(updated) > STALE_AFTER
+    except (ValueError, TypeError):
+        return False  # a timestamp we cannot read is not evidence of anything
+
+
+def doubtful_trainers(snapshots: dict[str, ClubSnapshot], now: datetime) -> list[str]:
+    """Trainers worth asking the source about: listed by two clubs, or listed with a stale row."""
+    listed: dict[str, int] = {}
+    stale: set[str] = set()
+    for snapshot in snapshots.values():
+        for member in snapshot.members:
+            listed[member.trainer_id] = listed.get(member.trainer_id, 0) + 1
+            if _is_stale(member.updated, now):
+                stale.add(member.trainer_id)
+    return sorted(t for t, n in listed.items() if n > 1 or t in stale)
+
+
 @dataclass(frozen=True)
 class LinkResult:
     status: str  # linked | relinked | invalid | not_found | not_synced
@@ -109,6 +132,7 @@ class TrackerService:
         self._sync_lock = threading.Lock()
         self._by_key = {c.key: c for c in self.clubs}
         self._by_id = {c.club_id: c for c in self.clubs}
+        self._where: dict[str, tuple[str | None, datetime]] = {}  # trainer -> (club id the source named, asked at)
 
     def club(self, key_or_id: str) -> ClubConfig | None:
         return self._by_key.get(key_or_id) or self._by_id.get(key_or_id)
@@ -135,7 +159,7 @@ class TrackerService:
                 except Exception as exc:  # noqa: BLE001 - logged with traceback, reported without detail
                     logger.exception("Unexpected error while syncing %s", club.key)
                     failed[club.key] = self._failed(club, f"unexpected error ({type(exc).__name__})")
-            fetched = drop_stale_duplicates(fetched)
+            fetched = drop_stale_duplicates(self._place_trainers(fetched))
             outcomes: list[SyncOutcome] = []
             for club in self.clubs:
                 if club.key in failed:
@@ -153,6 +177,37 @@ class TrackerService:
                     logger.exception("Unexpected error while syncing %s", club.key)
                     outcomes.append(self._failed(club, f"unexpected error ({type(exc).__name__})"))
             return outcomes
+
+    def _place_trainers(self, fetched: dict[str, ClubSnapshot]) -> dict[str, ClubSnapshot]:
+        """Ask the source where doubtful trainers are, and list each one only in that club.
+
+        The source keeps listing someone in a club they left, so two rosters can both claim a trainer.
+        Its own answer to "which circle is this trainer in" settles it: they stay only in that club, or in
+        none of ours if it names another circle. If it cannot tell, nothing is removed here.
+        """
+        lookup = getattr(self.source, "current_club", None)
+        if lookup is None:
+            return fetched
+        now = self._clock()
+        ours = {c.club_id: c.key for c in self.clubs}
+        for trainer_id in doubtful_trainers(fetched, now):
+            known = self._where.get(trainer_id)
+            if known is None or now - known[1] > LOOKUP_TTL:
+                known = (lookup(trainer_id), now)
+                self._where[trainer_id] = known
+            club_id = known[0]
+            listed_in = [k for k, snap in fetched.items() if any(m.trainer_id == trainer_id for m in snap.members)]
+            logger.info("Trainer %s is listed by %s; uma.moe says circle %s", trainer_id, listed_in, club_id)
+            if club_id is None:
+                continue
+            keep = ours.get(club_id)  # None: they are in a club we do not track
+            fetched = {
+                key: replace(snap, members=[m for m in snap.members if m.trainer_id != trainer_id])
+                if key != keep and key in listed_in
+                else snap
+                for key, snap in fetched.items()
+            }
+        return fetched
 
     def _failed(self, club: ClubConfig, message: str) -> SyncOutcome:
         try:

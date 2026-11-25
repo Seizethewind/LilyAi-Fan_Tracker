@@ -6,6 +6,7 @@ https://uma.moe/api/docs/openapi.yaml (version 1.0.0, read on 2026-11-22):
 * ``GET /api/v4/circles?circle_id=<id>`` returns a ``CircleResponse`` with ``circle``
   (``circle_id``, ``name``, ...) and ``members``. The spec lists no pagination
   parameters for it.
+* The same endpoint takes ``viewer_id`` instead ("Get circle for this trainer"); ``current_club`` uses it.
 * Authentication is an ``X-API-Key`` header.
 * Each member row has ``viewer_id`` (the trainer ID), ``trainer_name`` (nullable) and
   ``daily_fans``, described as a "31-element array of cumulative daily fan totals".
@@ -154,14 +155,12 @@ class UmaMoeSource:
             self._last_summary[snapshot.club_id] = (counts, now)
             logger.info(text)
 
-    def fetch_club(self, club_id: str) -> ClubSnapshot:
-        club_id = str(club_id).strip()
-        if not _CLUB_ID.fullmatch(club_id):
-            raise SourceError("club id must be numeric")
+    def _get(self, params: dict[str, str]) -> Any:
+        """GET /api/v4/circles with the given query. Raises SourceError on any failure."""
         try:
             response = self._session.get(
                 self._url,
-                params={"circle_id": club_id},
+                params=params,
                 headers={"X-API-Key": self._api_key, "Accept": "application/json"},
                 timeout=self._timeout,
             )
@@ -170,9 +169,29 @@ class UmaMoeSource:
         if response.status_code != 200:
             raise SourceError(_http_error(response))
         try:
-            payload = response.json()
+            return response.json()
         except ValueError as exc:
             raise SourceError("uma.moe returned invalid JSON") from exc
+
+    def fetch_club(self, club_id: str) -> ClubSnapshot:
+        club_id = str(club_id).strip()
+        if not _CLUB_ID.fullmatch(club_id):
+            raise SourceError("club id must be numeric")
+        payload = self._get({"circle_id": club_id})
         snapshot = parse_circle_response(payload, club_id)
         self._log_summary(payload, snapshot)
         return snapshot
+
+    def current_club(self, trainer_id: str) -> str | None:
+        """The circle uma.moe says this trainer is in now (``viewer_id`` query), or None if unknown."""
+        trainer_id = str(trainer_id).strip()
+        if not _CLUB_ID.fullmatch(trainer_id):
+            return None
+        try:
+            payload = self._get({"viewer_id": trainer_id})
+        except SourceError as exc:
+            logger.warning("Could not look up the circle of a trainer: %s", exc)
+            return None
+        circle = payload.get("circle") if isinstance(payload, dict) else None
+        circle_id = circle.get("circle_id") if isinstance(circle, dict) else None
+        return str(circle_id) if _is_int(circle_id) else None
