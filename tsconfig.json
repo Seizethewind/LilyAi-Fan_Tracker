@@ -4,13 +4,30 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "outDir": "dist",
-    "rootDir": "src",
+    "rootDir": ".",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "include": [
+    "ai_chat/**/*",
+    "app_server/**/*",
+    "authentication/**/*",
+    "background_sync/**/*",
+    "configuration/**/*",
+    "discord_commands/**/*",
+    "discord_formatting/**/*",
+    "discord_gateway/**/*",
+    "domain_models/**/*",
+    "fan_storage/**/*",
+    "fan_tracker/**/*",
+    "frontend_hosting/**/*",
+    "http_api/**/*",
+    "mention_parser/**/*",
+    "time_boundaries/**/*",
+    "umamoe_source/**/*"
+  ],
+  "exclude": ["node_modules", "dist", "dist_frontend", "frontend_web"]
 }

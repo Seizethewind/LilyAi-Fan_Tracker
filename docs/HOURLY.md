@@ -76,4 +76,4 @@ summed over the club (when history covers the whole day). A test checks this.
 
 - Accuracy depends on how often uma.moe refreshes member fan totals. If it refreshes less than
   hourly, some hours show 0 followed by a larger jump. This has not been checked on live data.
-- Tests use a fake data source and in-memory SQLite. They do not show how Turso or uma.moe behave.
+- Tests use a fake data source and the in-memory store (`MemoryStore`). They do not show how Turso or uma.moe behave.

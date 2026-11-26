@@ -49,5 +49,5 @@ to the mention itself still work, but the replied-to message's text may come thr
 
 ## Testing
 
-`tests/test_ai.py` is **mocked**: a fake router returning hand-written responses. It does not
+`tests/ai_http.test.mjs` is **mocked**: a fake chat completion client returning hand-written responses. It does not
 show that your real router accepts the request or that the Discord handler works in a server.

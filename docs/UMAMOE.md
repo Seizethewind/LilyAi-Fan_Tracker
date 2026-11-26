@@ -1,7 +1,6 @@
 # uma.moe client
 
-The uma.moe data source lives in `fantracker/sources/umamoe.py`. It implements the
-`FanSource` protocol in `fantracker/sources/base.py`, and `build_source()` returns it.
+The uma.moe data source lives in `umamoe_source/umamoe_client.ts` (alongside `umamoe_source/parse_circle_response.ts` and `umamoe_source/source_error.ts`). It implements the `FanSource` interface in `fan_tracker/tracker_types.ts`, and `buildSource()` in `umamoe_source/build_source.ts` returns it.
 
 Everything below comes from the OpenAPI spec at `https://uma.moe/api/docs/openapi.yaml`
 (version 1.0.0, read on 2026-11-22). Nothing is guessed except the items under
@@ -35,14 +34,14 @@ Everything below comes from the OpenAPI spec at `https://uma.moe/api/docs/openap
 
 ## Errors
 
-Every failure is raised as `SourceError` and ends up in the club's `last_error`. Messages
+Every failure is thrown as `SourceError` and ends up in the club's `last_error`. Messages
 never contain the API key. HTTP 401 and 403 mention `UMAMOE_API_KEY`.
 
 ## Tests
 
-`tests/test_umamoe.py` is **mocked**. Its fixture is hand-written to match the spec's
-`CircleResponse` schema, not captured from the live service. To verify for real, set
-`UMAMOE_API_KEY` and watch the first sync: `last_error` stays empty and the member
+The sync and command tests in `tests/discord_hourly.test.mjs` and `tests/ai_http.test.mjs`
+use a **mocked** `FanSource`. They do not hit the live uma.moe service. To verify for real,
+set `UMAMOE_API_KEY` and watch the first sync: `last_error` stays empty and the member
 counts match uma.moe.
 
 ## Key hygiene

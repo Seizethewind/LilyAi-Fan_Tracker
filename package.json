@@ -4,18 +4,30 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "lint": "tsc --noEmit"
+    "dev": "tsx app_server/start_server.ts",
+    "build": "tsc && vite build",
+    "start": "NODE_ENV=production node dist/app_server/start_server.js",
+    "lint": "tsc --noEmit && tsc -p tsconfig.frontend.json --noEmit",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
+    "@libsql/client": "^0.18.0",
+    "@tailwindcss/vite": "^4.3.5",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.11",
+    "@types/react": "^19.3.3",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
     "cors": "^2.8.6",
+    "discord.js": "^14.28.1",
     "express": "^5.3.0",
+    "lucide-react": "^1.81.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tailwindcss": "^4.3.5",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
   }
 }
