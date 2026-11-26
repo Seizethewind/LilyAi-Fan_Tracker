@@ -73,9 +73,9 @@ export class TursoStore implements StoreAdapter {
       sql: `SELECT m.trainer_id, m.name, m.fans,
               (SELECT d.fans FROM day_snapshots d
                WHERE d.trainer_id = m.trainer_id AND d.day >= ?
-               ORDER BY d.day ASC, (d.club_id = m.club_id) DESC LIMIT 1) AS base_fans
+               ORDER BY d.day ASC, (d.club_id = ?) DESC LIMIT 1) AS base_fans
             FROM members m WHERE m.club_id = ? AND m.active = 1`,
-      args: [startDay, clubId],
+      args: [startDay, clubId, clubId],
     });
     const scored = res.rows.map((r) => {
       const fans = Number(r.fans);
