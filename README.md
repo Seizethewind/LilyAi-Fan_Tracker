@@ -54,6 +54,8 @@ Deploy cleanly using `render.yaml`:
 4. Enter your secrets when prompted: `DISCORD_TOKEN`, `UMAMOE_API_KEY`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `API_READ_KEY`, `API_WRITE_KEY`, and optionally `DISCORD_GUILD_ID`, `AI_ROUTER_URL`, `AI_ROUTER_API_KEY`.
 5. Render injects `RENDER=true` and `RENDER_EXTERNAL_URL` automatically; the app requires Turso when `RENDER` is set and pings `/health` every 300 seconds.
 
+> **Troubleshooting build errors on an older Render service**: If deploy logs still show an old runtime, cached build environment, or a missing legacy command (`command not found`), pushing `render.yaml` alone will not overwrite an existing Render Web Service's runtime or Build Command. Retire the old service (or clear its legacy runtime variables and build cache) and recreate it using **New → Blueprint** after pushing the latest commit to `main`.
+
 ## Environment variables
 
 See [.env.example](.env.example). Secrets are read solely from environment variables and never stored in client code.

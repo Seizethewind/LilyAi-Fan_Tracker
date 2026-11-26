@@ -19,10 +19,12 @@ test("Render deployment requires both Turso credentials", () => {
 
   const valid = loadSettings({
     RENDER: "true",
+    PORT: "10000",
     TURSO_DATABASE_URL: "libsql://db.turso.io",
     TURSO_AUTH_TOKEN: "token-123",
   });
   assert.doesNotThrow(() => validateForRuntime(valid));
+  assert.equal(valid.port, 10000);
 });
 
 test("15:00 UTC reset boundaries and month-capped weeks", () => {
