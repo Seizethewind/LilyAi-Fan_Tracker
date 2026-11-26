@@ -16,6 +16,7 @@ import { buildHourlyRows, HourSnapshotPoint } from "./build_hourly_rows.js";
 import { computeGain } from "./compute_gain.js";
 import { StoreAdapter } from "./store_adapter.js";
 import { tursoApplySync } from "./turso_apply_sync.js";
+import { migrateLegacyTables } from "./turso_migrate.js";
 import { TURSO_SCHEMA_STATEMENTS } from "./turso_schema.js";
 
 export class TursoStore implements StoreAdapter {
@@ -30,6 +31,7 @@ export class TursoStore implements StoreAdapter {
     for (const sql of TURSO_SCHEMA_STATEMENTS) {
       await this.client.execute(sql);
     }
+    await migrateLegacyTables(this.client);
   }
 
   async applySync(snapshot: ClubSnapshot, now: Date): Promise<SyncResult> {
