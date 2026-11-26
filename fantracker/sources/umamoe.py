@@ -22,6 +22,7 @@ import logging
 import re
 import time
 from collections.abc import Callable
+from datetime import date, timedelta
 from typing import Any
 
 import requests
@@ -54,6 +55,21 @@ def current_fans(daily_fans: Any) -> int | None:
     return latest
 
 
+def month_history(row: dict[str, Any]) -> tuple[tuple[str, int], ...]:
+    """(game day, total at the start of that day) for the month so far, minus today's live entry.
+
+    ``daily_fans[i]`` is the total at the end of day i+1, which is the start of day i+2. Negative values
+    mark days spent in a previous club; they are the same totals, so the sign is dropped. Zero is a gap.
+    Checked against a uma.moe club export, where monthly_gain = current total - daily_fans[0].
+    """
+    values, year, month = row.get("daily_fans"), row.get("year"), row.get("month")
+    if not isinstance(values, list) or not _is_int(year) or not _is_int(month) or not 1 <= month <= 12:
+        return ()
+    known = [(i, abs(v)) for i, v in enumerate(values) if _is_int(v) and v != 0]
+    first = date(year, month, 1)
+    return tuple(((first + timedelta(days=i + 1)).isoformat(), v) for i, v in known[:-1])  # last = live
+
+
 def parse_circle_response(payload: Any, club_id: str) -> ClubSnapshot:
     """Turn a ``CircleResponse`` into a ClubSnapshot. Raises SourceError if it is unusable."""
     if not isinstance(payload, dict):
@@ -81,7 +97,9 @@ def parse_circle_response(payload: Any, club_id: str) -> ClubSnapshot:
         name = name.strip() if isinstance(name, str) and name.strip() else trainer_id
         stamp = row.get("last_updated")
         updated = stamp if isinstance(stamp, str) else None
-        members.append(SourceMember(trainer_id=trainer_id, name=name, fans=fans, updated=updated))
+        members.append(
+            SourceMember(trainer_id=trainer_id, name=name, fans=fans, updated=updated, history=month_history(row))
+        )
 
     if not members:
         # An empty roster would make the tracker think everyone left, so fail the sync instead.
