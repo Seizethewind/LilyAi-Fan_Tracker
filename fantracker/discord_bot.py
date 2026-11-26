@@ -49,7 +49,8 @@ async def _run(interaction: discord.Interaction, handler, *args, ephemeral: bool
 
 def register_commands(tree: app_commands.CommandTree, service: TrackerService) -> None:
     club_choices = [app_commands.Choice(name=c.label, value=c.key) for c in service.clubs]
-    club_choices.append(app_commands.Choice(name="Both clubs", value="both"))
+    if len(service.clubs) > 1:
+        club_choices.append(app_commands.Choice(name="Both clubs", value="both"))
     period_choices = [app_commands.Choice(name=cmd.PERIOD_LABELS[p], value=p) for p in PERIODS]
     top_choices = [app_commands.Choice(name=f"Top {n}", value=n) for n in cmd.TOP_CHOICES]
     day_choices = [app_commands.Choice(name=label, value=key) for key, label in cmd.DAY_LABELS.items()]

@@ -1,6 +1,6 @@
 # LilyAi Fan Tracker
 
-A Discord bot that tracks fan gains for two uma.moe clubs, plus a small HTTP API for the
+A Discord bot that tracks fan gains for an uma.moe club, plus a small HTTP API for the
 LilyAi app. It runs 24/7 on Render's free tier: the bot and the web server share one
 process, and a self-pinger requests the service's own `/health` every 300 seconds.
 
@@ -12,9 +12,9 @@ process, and a self-pinger requests the service's own `/health` every 300 second
 
 | Command | What it does |
 | --- | --- |
-| `/link trainer_id` | Links your Discord account to your trainer ID (must be in one of the two clubs) |
+| `/link trainer_id` | Links your Discord account to your trainer ID (must be in the club) |
 | `/unlink` | Removes the link |
-| `/leaderboard club period [top]` | Club 1, Club 2 or both; daily, weekly or monthly; top 10, 15 or 30 |
+| `/leaderboard club period [top]` | Club 1; daily, weekly or monthly; top 10, 15 or 30 |
 | `/fan_gain period [user]` | Your fan gain, rank and total, or another linked user's |
 
 ## Rules
@@ -26,11 +26,7 @@ process, and a self-pinger requests the service's own `/health` every 300 second
   starts on Wednesday the 1st. A week never spans two months.
 - **Join day counts as 0.** Gains compute normally from the next game day.
 - Members who leave are removed from the roster.
-- **Moving between clubs keeps the gain.** Someone promoted from Club 2 to Club 1 keeps the fans already
-  earned this period instead of restarting at 0. uma.moe keeps listing a member in the club they left, so
-  for a trainer listed by both clubs, or with a row not refreshed for 24 hours, the bot asks uma.moe which
-  circle the trainer is in now and keeps them only there. If uma.moe cannot say, the row refreshed most
-  recently wins.
+- Only one club is tracked. Club 2 is not synced, listed or choosable; a leftover `CLUB2_ID` setting is ignored.
 - Leaving and rejoining in the **same month** keeps the original baseline. Rejoining in a **later month** counts as a new player.
 - Data refreshes every 5 minutes. Commands read saved data and never call uma.moe directly.
 - Tables show at most 30 rows per club.
