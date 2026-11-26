@@ -59,9 +59,9 @@ def test_rate_limiter_window():
 # ---- config -----------------------------------------------------------
 
 
-def test_defaults_use_the_two_clubs():
+def test_defaults_use_the_one_club():
     s = load_settings({})
-    assert [c.club_id for c in s.clubs] == ["974470619", "325938032"]
+    assert [c.club_id for c in s.clubs] == ["974470619"]
     assert s.sync_interval_seconds == 300 and s.self_ping_interval_seconds == 300
     assert s.self_ping_url is None and s.discord_token is None
 
@@ -84,12 +84,15 @@ def test_blank_values_count_as_unset():
         {"SYNC_INTERVAL_SECONDS": "abc"},
         {"SYNC_INTERVAL_SECONDS": "5"},  # below the 60s floor
         {"DISCORD_GUILD_ID": "not-a-number"},
-        {"CLUB1_ID": "1", "CLUB2_ID": "1"},
     ],
 )
 def test_invalid_settings_are_rejected(env):
     with pytest.raises(ConfigError):
         load_settings(env)
+
+
+def test_a_leftover_club2_setting_is_ignored():
+    assert [c.key for c in load_settings({"CLUB2_ID": "325938032"}).clubs] == ["club1"]
 
 
 def test_render_without_turso_is_a_fatal_error():

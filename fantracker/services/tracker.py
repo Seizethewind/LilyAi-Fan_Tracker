@@ -283,8 +283,10 @@ class TrackerService:
             synced = any(info.last_synced_at for _, info in self.club_infos())
             return LinkResult("not_found" if synced else "not_synced")
         club_id, name, _fans = found
-        previous = self.store.set_link(discord_id, trainer_id, self._clock())
         club = self._by_id.get(club_id)
+        if club is None:  # only on a roster we no longer track
+            return LinkResult("not_found")
+        previous = self.store.set_link(discord_id, trainer_id, self._clock())
         status = "relinked" if previous and previous != trainer_id else "linked"
         return LinkResult(status, trainer_id, name, club.label if club else None)
 
