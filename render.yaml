@@ -36,8 +36,6 @@ services:
         value: auto
       - key: CLUB1_ID
         value: "974470619"
-      - key: CLUB2_ID
-        value: "325938032"
       - key: SYNC_INTERVAL_SECONDS
         value: "300"
       - key: SELF_PING_INTERVAL_SECONDS

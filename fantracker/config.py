@@ -1,7 +1,7 @@
 """Settings, read once from environment variables.
 
-No secret has a default. Club IDs are not secret, so the two clubs this
-project was built for are the defaults.
+No secret has a default. Club IDs are not secret, so the club this project
+was built for is the default. Only one club is tracked.
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 DEFAULT_CLUB1_ID = "974470619"
-DEFAULT_CLUB2_ID = "325938032"
 
 
 class ConfigError(RuntimeError):
@@ -77,12 +76,8 @@ def _int(env: Mapping[str, str], name: str, default: int, *, minimum: int) -> in
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     env = os.environ if env is None else env
 
-    clubs = (
-        ClubConfig("club1", _opt(env, "CLUB1_ID") or DEFAULT_CLUB1_ID, _opt(env, "CLUB1_LABEL") or "Club 1"),
-        ClubConfig("club2", _opt(env, "CLUB2_ID") or DEFAULT_CLUB2_ID, _opt(env, "CLUB2_LABEL") or "Club 2"),
-    )
-    if clubs[0].club_id == clubs[1].club_id:
-        raise ConfigError("CLUB1_ID and CLUB2_ID must be different")
+    # One club only. A leftover CLUB2_ID in the environment is ignored on purpose.
+    clubs = (ClubConfig("club1", _opt(env, "CLUB1_ID") or DEFAULT_CLUB1_ID, _opt(env, "CLUB1_LABEL") or "Club 1"),)
 
     guild_raw = _opt(env, "DISCORD_GUILD_ID")
     if guild_raw is not None and not guild_raw.isdigit():
