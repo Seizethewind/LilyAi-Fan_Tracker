@@ -1,82 +1,70 @@
 # LilyAi Fan Tracker
 
-A Discord bot that tracks fan gains for two uma.moe clubs, plus a small HTTP API for the
-LilyAi app. It runs 24/7 on Render's free tier: the bot and the web server share one
-process, and a self-pinger requests the service's own `/health` every 300 seconds.
+A Node.js 22 + TypeScript Discord bot, REST API, and React dashboard for tracking fan gains across two `uma.moe` clubs. The web console, API server, 5-minute sync loop, Render self-pinger, and Discord gateway all run in one unified process.
 
-> **Status:** everything works against a mocked data source. The uma.moe client is
-> still to be written because the API spec was not reachable; see [docs/UMAMOE.md](docs/UMAMOE.md).
-> The Discord layer and the API have not been run against real Discord, Turso or uma.moe yet.
+## Discord Bot Features
 
-## Slash commands
+### Slash commands
 
 | Command | What it does |
 | --- | --- |
-| `/link trainer_id` | Links your Discord account to your trainer ID (must be in one of the two clubs) |
-| `/unlink` | Removes the link |
-| `/leaderboard club period [top]` | Club 1, Club 2 or both; daily, weekly or monthly; top 10, 15 or 30 |
-| `/fan_gain period [user]` | Your fan gain, rank and total, or another linked user's |
+| `/link trainer_id` | Links your Discord account to your trainer ID (must be on one of the two club rosters) |
+| `/unlink` | Removes your trainer link |
+| `/leaderboard [club] [period] [top]` | Club 1, Club 2, or both; `daily`, `weekly`, or `monthly`; top 1–30 |
+| `/fan_gain [user]` | Your daily, weekly, and monthly fan gain, rank, and total fans (or another linked user's) |
+| `/fan_gain_history [club] [user] [day]` | Hour-by-hour fan gain breakdown since the 15:00 UTC reset (`today` or `yesterday`) |
+
+### `@mention` AI Chat
+
+Mention Lily in Discord (or test prompts from the **AI Chat** panel in the web dashboard) when `AI_ROUTER_URL` and `AI_ROUTER_API_KEY` are configured:
+
+- Walks backward through Discord reply chains (up to 6 messages) for conversational continuity.
+- Supplies live club sync timestamps, top daily/weekly/monthly leaders, and the asker's linked trainer standings.
+- Enforces per-user cooldowns and automatic `Retry-After` backoff during upstream AI router outages without affecting fan tracking or slash commands.
 
 ## Rules
 
-- Every reset happens at **15:00 UTC** (00:00 JST), when the game and uma.moe reset their own tallies.
-- **Daily** is one game day. **Monthly** is the whole month's total, from the 1st until the next month's reset.
-- **Weekly** runs Monday to Sunday (the Monday reset is Sunday 15:00 UTC), but a month end cuts it short:
-  the new month starts a new week. If a month ends on a Tuesday, that week stops there and the next one
-  starts on Wednesday the 1st. A week never spans two months.
-- **Join day counts as 0.** Gains compute normally from the next game day.
-- Members who leave are removed from the roster.
-- **Moving between clubs keeps the gain.** Someone promoted from Club 2 to Club 1 keeps the fans already
-  earned this period instead of restarting at 0. uma.moe keeps listing a member in the club they left, so
-  for a trainer listed by both clubs, or with a row not refreshed for 24 hours, the bot asks uma.moe which
-  circle the trainer is in now and keeps them only there. If uma.moe cannot say, the row refreshed most
-  recently wins.
-- Leaving and rejoining in the **same month** keeps the original baseline. Rejoining in a **later month** counts as a new player.
-- Data refreshes every 5 minutes. Commands read saved data and never call uma.moe directly.
-- Tables show at most 30 rows per club.
+- Every reset happens at **15:00 UTC** (00:00 JST), matching the game and `uma.moe`.
+- **Daily** is one game day. **Monthly** runs from the 1st until the next month's reset.
+- **Weekly** runs Monday to Sunday (Monday reset is Sunday 15:00 UTC), capped at month boundaries so a week never spans two months.
+- **Join day counts as 0.** Gains compute normally starting the next game day.
+- **Moving between clubs keeps the gain** instead of restarting at 0, resolving stale duplicates cleanly.
+- Data refreshes every 5 minutes (`SYNC_INTERVAL_SECONDS`). Commands and API queries read stored state and never call `uma.moe` directly.
 
-## Run locally
+## Run locally (Node.js 22)
 
 ```bash
-python -m venv .venv && . .venv/bin/activate
-pip install -r requirements-dev.txt
-cp .env.example .env        # fill in the values, then export them or use your shell's env loader
-python -m pytest
-python -m fantracker.main
+npm install
+cp .env.example .env        # fill in your keys and load into your shell environment
+npm run lint
+npm run build
+npm test
+npm start                   # or `npm run dev` for development
 ```
 
-Without Turso settings it uses a local SQLite file (`SQLITE_PATH`). Without `DISCORD_TOKEN` only the API runs.
+Without Turso settings, local runs fall back to an in-memory store. Without `DISCORD_TOKEN`, only the HTTP API and web dashboard run.
 
 ## Deploy on Render
 
-1. Create a Turso database and a token: `turso db create fan-tracker`, `turso db show fan-tracker --url`, `turso db tokens create fan-tracker`.
-2. In the Discord developer portal create a bot. No privileged intents are needed. Invite it with the `applications.commands` and `bot` scopes.
-3. In Render choose **New > Blueprint** and pick this repo. `render.yaml` sets up the web service.
-4. Enter the secrets when prompted: `DISCORD_TOKEN`, `UMAMOE_API_KEY`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `API_READ_KEY`, `API_WRITE_KEY`, and optionally `DISCORD_GUILD_ID`.
-5. Render sets `RENDER_EXTERNAL_URL` itself, which is what the self-pinger uses.
+> **Upgrading an existing Python service on Render?**
+> If you originally created your Render Web Service for Python, pushing `render.yaml` alone will not change an existing service's runtime—Render will keep running `pip install -r requirements.txt` unless updated. In your Render Dashboard under **Settings**:
+> 1. Set **Language** (Runtime) to **Node** (Node 22).
+> 2. Set **Build Command** to `npm install --no-audit --no-fund && npm run build`.
+> 3. Set **Start Command** to `npm start`.
+> 4. Set **Health Check Path** to `/health`.
 
-Render's free filesystem is wiped on every restart, so the app refuses to start on Render without Turso.
-Free services have 750 instance hours per month, which is enough for one service running continuously.
+Or deploy cleanly from scratch using `render.yaml`:
+
+1. Create a Turso database and token (`turso db create fan-tracker`, `turso db show fan-tracker --url`, `turso db tokens create fan-tracker`).
+2. Create a Discord bot in the Discord Developer Portal and invite it with the `applications.commands` and `bot` scopes (optionally enable **Message Content** intent so Lily can read replied-to message text on `@mentions`).
+3. In Render choose **New → Blueprint** and select this repository (`render.yaml` configures Node 22, build/start commands, and `/health`).
+4. Enter your secrets when prompted: `DISCORD_TOKEN`, `UMAMOE_API_KEY`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `API_READ_KEY`, `API_WRITE_KEY`, and optionally `DISCORD_GUILD_ID`, `AI_ROUTER_URL`, `AI_ROUTER_API_KEY`.
+5. Render injects `RENDER=true` and `RENDER_EXTERNAL_URL` automatically; the app requires Turso when `RENDER` is set and pings `/health` every 300 seconds.
 
 ## Environment variables
 
-See [.env.example](.env.example). Secrets are only ever read from the environment.
+See [.env.example](.env.example). Secrets are read solely from environment variables and never stored in client code.
 
 ## API
 
-See [docs/API.md](docs/API.md).
-
-## Layout
-
-```
-fantracker/
-  config.py, timeutil.py     settings, period boundaries (15:00 UTC)
-  storage/                   SQLite and Turso backends, all SQL in store.py
-  sources/                   data source interface (uma.moe client goes here)
-  services/tracker.py        sync and query logic, shared by Discord and the API
-  commands.py, formatting.py command replies and tables
-  discord_bot.py             discord.py wiring
-  api.py, auth.py            FastAPI routes, bearer keys, rate limit
-  runner.py                  5-minute sync loop and self-ping loop
-  main.py                    entry point
-```
+Interactive API summary: `/api/v1/docs` (OpenAPI spec at `/api/v1/openapi.json`). See [docs/API.md](docs/API.md), [docs/HOURLY.md](docs/HOURLY.md), and [docs/AI.md](docs/AI.md).

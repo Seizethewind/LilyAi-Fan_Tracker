@@ -3,11 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "vite build && tsc",
     "start": "node dist/server/index.js",
-    "lint": "tsc --noEmit && tsc -p tsconfig.client.json --noEmit"
+    "lint": "tsc --noEmit && tsc -p tsconfig.client.json --noEmit",
+    "test": "node --test tests/app.test.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.5",

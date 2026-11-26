@@ -3,7 +3,7 @@ services:
     name: lilyai-fan-tracker
     runtime: node
     plan: free
-    buildCommand: npm ci && npm run build
+    buildCommand: npm install --no-audit --no-fund && npm run build
     startCommand: npm start
     healthCheckPath: /health
     autoDeploy: true
