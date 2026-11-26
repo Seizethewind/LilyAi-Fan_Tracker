@@ -1,0 +1,5 @@
+{
+  "name": "LilyAi Fan Tracker",
+  "description": "Fan gain tracker API for uma.moe clubs with daily, weekly, and monthly leaderboards and sync scheduling.",
+  "requestFramePermissions": []
+}

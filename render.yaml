@@ -1,17 +1,18 @@
 services:
   - type: web
     name: lilyai-fan-tracker
-    runtime: python
+    runtime: node
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn fantracker.main:app --host 0.0.0.0 --port $PORT
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
     healthCheckPath: /health
-    autoDeployTrigger: commit
+    autoDeploy: true
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.13.5
-      # Secrets: Render asks for these on first deploy and never stores them in the repo.
+      - key: NODE_VERSION
+        value: "22"
       - key: DISCORD_TOKEN
+        sync: false
+      - key: DISCORD_GUILD_ID
         sync: false
       - key: UMAMOE_API_KEY
         sync: false
@@ -23,21 +24,24 @@ services:
         sync: false
       - key: API_WRITE_KEY
         sync: false
-      # Optional: set to your server's ID so slash commands appear instantly.
-      - key: DISCORD_GUILD_ID
-        sync: false
-      # Optional: AI replies when the bot is @mentioned, through your AI router.
-      # AI_ROUTER_URL ends in /v1. Leave both unset to keep the feature off.
       - key: AI_ROUTER_URL
         sync: false
       - key: AI_ROUTER_API_KEY
         sync: false
       - key: AI_MODEL
         value: auto
+      - key: AI_USER_COOLDOWN_SECONDS
+        value: "10"
+      - key: CORS_ORIGINS
+        sync: false
       - key: CLUB1_ID
         value: "974470619"
+      - key: CLUB1_LABEL
+        value: Club 1
       - key: CLUB2_ID
         value: "325938032"
+      - key: CLUB2_LABEL
+        value: Club 2
       - key: SYNC_INTERVAL_SECONDS
         value: "300"
       - key: SELF_PING_INTERVAL_SECONDS
