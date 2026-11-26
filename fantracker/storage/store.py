@@ -16,6 +16,8 @@ That one rule produces the behaviour the project asked for:
 * Leaving removes the member from the roster (active = 0). Snapshots stay.
 * Moving to the other club keeps the baseline: snapshots are matched by trainer, whichever club
   stored them, so someone promoted from Club 2 to Club 1 keeps the gain they already earned.
+* The source's own daily totals for the month fill in snapshots we missed, so the month starts where
+  uma.moe's monthly gain starts, and a member who came from the other club keeps the days they earned there.
 * Rejoining in the same month finds their older snapshots, so the original
   baseline is restored. Rejoining in a later month finds none for the new
   month, so they start over like a new player.
@@ -97,6 +99,7 @@ WHERE h.hour >= ? AND h.hour <= ?
 ORDER BY h.hour ASC
 """
 
+HISTORY_CHUNK = 200  # rows per statement; older SQLite allows 999 variables
 HOUR_HISTORY_DAYS = 8  # hourly snapshots older than this are deleted
 
 
@@ -122,6 +125,7 @@ def compute_gain(current: int, baseline: int | None) -> int:
 class Store:
     def __init__(self, db: Database) -> None:
         self.db = db
+        self._filled: dict[str, str] = {}  # club -> game day whose history was last written
 
     def init_schema(self) -> None:
         self.db.execute_many([(sql, ()) for sql in SCHEMA])
@@ -173,6 +177,26 @@ class Store:
                 [stamp, club_id, *present],
             ),
         ]
+        # The source's own record of earlier days fills what we missed (service down, a member who came from
+        # the other club). Goes before today's snapshot, so the source's exact start-of-day total beats our
+        # later live one. Never overwrites a snapshot already stored. Once per game day per process, or when
+        # someone joins.
+        if self._filled.get(club_id) != today or joined:
+            days = [
+                (club_id, m.trainer_id, day, fans)
+                for m in members.values()
+                for day, fans in m.history
+                if day <= today
+            ]
+            for i in range(0, len(days), HISTORY_CHUNK):
+                chunk = days[i : i + HISTORY_CHUNK]
+                statements.append(
+                    (
+                        "INSERT OR IGNORE INTO day_snapshots (club_id, trainer_id, day, fans) "
+                        f"VALUES {', '.join(['(?, ?, ?, ?)'] * len(chunk))}",
+                        [x for row in chunk for x in row],
+                    )
+                )
         if not have_today_snapshot:
             snap_values: list = []
             for member in members.values():
@@ -212,6 +236,7 @@ class Store:
             )
         )
         self.db.execute_many(statements)
+        self._filled[club_id] = today
         return SyncResult(
             club_id=club_id,
             member_count=len(members),
