@@ -1,15 +1,13 @@
 import { ClubConfig } from "../config.js";
-import { HourlyDay, HourlyHistory, buildHistory } from "../hourly.js";
 import { ClubInfo, ClubSnapshot, Period, PERIODS, StandingRow, SyncOutcome } from "../models.js";
 import { FanSource, SourceError } from "../sources/umamoe.js";
-import { FanStore } from "../storage/store.js";
+import { Store } from "../storage/store.js";
 import { nextReset, utcNow } from "../timeutil.js";
 
 export const MAX_TOP = 30;
 const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
 const LOOKUP_TTL_MS = 30 * 60 * 1000;
 const TRAINER_ID_RE = /^[A-Za-z0-9_]{1,32}$/;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function normalizeTrainerId(raw: string): string {
   return raw.replace(/[\s-]/g, "");
@@ -87,16 +85,6 @@ export interface Standing {
   resetsAt: Date;
 }
 
-export interface HourlyView {
-  club: ClubConfig;
-  day: HourlyDay;
-  history: HourlyHistory;
-  info: ClubInfo;
-  resetsAt: Date;
-  trainerId: string | null;
-  trainerName: string | null;
-}
-
 export interface LinkResult {
   status: "linked" | "relinked" | "invalid" | "not_found" | "not_synced";
   trainerId?: string;
@@ -105,7 +93,7 @@ export interface LinkResult {
 }
 
 export class TrackerService {
-  readonly store: FanStore;
+  readonly store: Store;
   readonly source: FanSource;
   readonly clubs: readonly ClubConfig[];
   private readonly clock: () => Date;
@@ -115,7 +103,7 @@ export class TrackerService {
   private syncing: Promise<SyncOutcome[]> | null = null;
 
   constructor(
-    store: FanStore,
+    store: Store,
     source: FanSource,
     clubs: readonly ClubConfig[],
     clock: () => Date = utcNow
@@ -198,7 +186,7 @@ export class TrackerService {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(`Sync of ${club.key} failed: ${msg}`);
-        failed[club.key] = await this.recordFailure(club, msg);
+        failed[club.key] = this.recordFailure(club, msg);
       }
     }
 
@@ -215,158 +203,82 @@ export class TrackerService {
         if (!snapshot || snapshot.members.length === 0) {
           throw new SourceError("the source returned an empty roster; keeping the previous data");
         }
-        const result = await this.store.applySync(snapshot, this.clock());
+        const result = this.store.applySync(snapshot, this.clock());
         outcomes.push({ clubKey: club.key, ok: true, error: null, result });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(`Sync of ${club.key} failed: ${msg}`);
-        outcomes.push(await this.recordFailure(club, msg));
+        outcomes.push(this.recordFailure(club, msg));
       }
     }
 
     return outcomes;
   }
 
-  private async recordFailure(club: ClubConfig, message: string): Promise<SyncOutcome> {
-    try {
-      await this.store.recordSyncError(club.clubId, message, this.clock());
-    } catch (err) {
-      console.error(`Could not record sync error for ${club.key}`, err);
-    }
+  private recordFailure(club: ClubConfig, message: string): SyncOutcome {
+    this.store.recordSyncError(club.clubId, message, this.clock());
     return { clubKey: club.key, ok: false, error: message, result: null };
   }
 
-  async clubInfos(): Promise<Array<readonly [ClubConfig, ClubInfo]>> {
-    const infos = await Promise.all(this.clubs.map((c) => this.store.clubInfo(c.clubId)));
-    return this.clubs.map((club, i) => [club, infos[i]] as const);
+  clubInfos(): Array<readonly [ClubConfig, ClubInfo]> {
+    return this.clubs.map((club) => [club, this.store.clubInfo(club.clubId)] as const);
   }
 
-  async leaderboard(club: ClubConfig, period: Period, top: number): Promise<Leaderboard> {
+  leaderboard(club: ClubConfig, period: Period, top: number): Leaderboard {
     const clampedTop = Math.max(1, Math.min(Math.trunc(top), MAX_TOP));
     const now = this.clock();
-    const [allRows, info] = await Promise.all([
-      this.store.standings(club.clubId, period, now),
-      this.store.clubInfo(club.clubId),
-    ]);
+    const rows = this.store.standings(club.clubId, period, now).slice(0, clampedTop);
     return {
       club,
       period,
       top: clampedTop,
-      rows: allRows.slice(0, clampedTop),
-      info,
+      rows,
+      info: this.store.clubInfo(club.clubId),
       resetsAt: nextReset(period, now),
     };
   }
 
-  async standingForTrainer(trainerId: string, period: Period): Promise<Standing | null> {
-    const normalized = normalizeTrainerId(trainerId);
-    const found = await this.store.findActiveMember(normalized);
+  standingForTrainer(trainerId: string, period: Period): Standing | null {
+    const found = this.store.findActiveMember(trainerId);
     if (!found) return null;
     const club = this.byId.get(found.clubId);
     if (!club) return null;
     const now = this.clock();
-    const [rows, info] = await Promise.all([
-      this.store.standings(club.clubId, period, now),
-      this.store.clubInfo(club.clubId),
-    ]);
-    const row = rows.find((r) => r.trainerId === normalized);
+    const rows = this.store.standings(club.clubId, period, now);
+    const row = rows.find((r) => r.trainerId === trainerId);
     if (!row) return null;
     return {
       club,
       period,
       row,
       rosterSize: rows.length,
-      info,
+      info: this.store.clubInfo(club.clubId),
       resetsAt: nextReset(period, now),
     };
   }
 
-  async allStandingsForTrainer(trainerId: string): Promise<Partial<Record<Period, Standing>>> {
-    const normalized = normalizeTrainerId(trainerId);
-    const found = await this.store.findActiveMember(normalized);
-    if (!found) return {};
-    const club = this.byId.get(found.clubId);
-    if (!club) return {};
-    const now = this.clock();
-    const info = await this.store.clubInfo(club.clubId);
+  allStandingsForTrainer(trainerId: string): Partial<Record<Period, Standing>> {
     const result: Partial<Record<Period, Standing>> = {};
-    await Promise.all(
-      PERIODS.map(async (p) => {
-        const rows = await this.store.standings(club.clubId, p, now);
-        const row = rows.find((r) => r.trainerId === normalized);
-        if (row) {
-          result[p] = {
-            club,
-            period: p,
-            row,
-            rosterSize: rows.length,
-            info,
-            resetsAt: nextReset(p, now),
-          };
-        }
-      })
-    );
+    for (const p of PERIODS) {
+      const standing = this.standingForTrainer(trainerId, p);
+      if (standing) {
+        result[p] = standing;
+      }
+    }
     return result;
   }
 
-  async fanGainHistory(club: ClubConfig, day: HourlyDay = "today"): Promise<HourlyView> {
-    return this.buildHourlyView(club, day, null, null);
-  }
-
-  async trainerFanGainHistory(
-    trainerId: string,
-    day: HourlyDay = "today"
-  ): Promise<HourlyView | null> {
-    const normalized = normalizeTrainerId(trainerId);
-    const found = await this.store.findActiveMember(normalized);
-    if (!found) return null;
-    const club = this.byId.get(found.clubId);
-    if (!club) return null;
-    return this.buildHourlyView(club, day, normalized, found.name);
-  }
-
-  private async buildHourlyView(
-    club: ClubConfig,
-    day: HourlyDay,
-    trainerId: string | null,
-    trainerName: string | null
-  ): Promise<HourlyView> {
-    const now = this.clock();
-    const resetsAt = nextReset("daily", now);
-    const todayStart = new Date(resetsAt.getTime() - DAY_MS);
-    const info = await this.store.clubInfo(club.clubId);
-
-    const start = day === "yesterday" ? new Date(todayStart.getTime() - DAY_MS) : todayStart;
-    const end = day === "yesterday" ? todayStart : resetsAt;
-    const current = day === "yesterday" ? null : await this.store.currentFans(club.clubId);
-    const liveTime = day === "yesterday" ? end : info.lastSyncedAt ?? now;
-
-    const rows = await this.store.hourRows(club.clubId, start, end);
-    const history = buildHistory(rows, current, start, end, liveTime, trainerId ?? undefined);
-
-    return {
-      club,
-      day,
-      history,
-      info,
-      resetsAt,
-      trainerId,
-      trainerName,
-    };
-  }
-
-  async link(discordId: string, rawTrainerId: string): Promise<LinkResult> {
+  link(discordId: string, rawTrainerId: string): LinkResult {
     const trainerId = normalizeTrainerId(rawTrainerId);
     if (!TRAINER_ID_RE.test(trainerId)) {
       return { status: "invalid" };
     }
-    const found = await this.store.findActiveMember(trainerId);
+    const found = this.store.findActiveMember(trainerId);
     if (!found) {
-      const infos = await this.clubInfos();
-      const synced = infos.some(([, info]) => info.lastSyncedAt !== null);
+      const synced = this.clubInfos().some(([, info]) => info.lastSyncedAt !== null);
       return { status: synced ? "not_found" : "not_synced" };
     }
-    const previous = await this.store.setLink(discordId, trainerId, this.clock());
+    const previous = this.store.setLink(discordId, trainerId);
     const club = this.byId.get(found.clubId);
     return {
       status: previous && previous !== trainerId ? "relinked" : "linked",
@@ -376,7 +288,7 @@ export class TrackerService {
     };
   }
 
-  async unlink(discordId: string): Promise<boolean> {
+  unlink(discordId: string): boolean {
     return this.store.removeLink(discordId);
   }
 }

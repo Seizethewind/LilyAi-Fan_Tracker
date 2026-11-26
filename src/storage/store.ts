@@ -1,26 +1,6 @@
 import { ClubInfo, ClubSnapshot, Period, StandingRow, SyncResult } from "../models.js";
 import { iso, parseIso, periodStartDay } from "../timeutil.js";
 
-export interface HourRow {
-  trainerId: string;
-  hour: Date;
-  fans: number;
-}
-
-export interface FanStore {
-  init(): Promise<void>;
-  applySync(snapshot: ClubSnapshot, now: Date): Promise<SyncResult>;
-  recordSyncError(clubId: string, message: string, now: Date): Promise<void>;
-  clubInfo(clubId: string): Promise<ClubInfo>;
-  standings(clubId: string, period: Period, now: Date): Promise<StandingRow[]>;
-  hourRows(clubId: string, start: Date, end: Date): Promise<HourRow[]>;
-  currentFans(clubId: string): Promise<Map<string, number>>;
-  findActiveMember(trainerId: string): Promise<{ clubId: string; name: string; fans: number } | null>;
-  setLink(discordId: string, trainerId: string, now: Date): Promise<string | null>;
-  getLink(discordId: string): Promise<string | null>;
-  removeLink(discordId: string): Promise<boolean>;
-}
-
 interface ClubRecord {
   clubId: string;
   name: string | null;
@@ -40,7 +20,7 @@ interface MemberRecord {
   leftAt: string | null;
 }
 
-export const HOUR_HISTORY_DAYS = 8;
+const HOUR_HISTORY_DAYS = 8;
 
 export function hourMark(moment: Date): Date {
   const copy = new Date(moment.getTime());
@@ -54,17 +34,21 @@ export function computeGain(current: number, baseline: number | null): number {
   return current - baseline;
 }
 
-export class MemoryStore implements FanStore {
+/**
+ * In-memory store preserving the exact gain, baseline, club transfer, and
+ * hourly snapshot semantics of the original SQLite/Turso store.
+ */
+export class Store {
   private readonly clubs = new Map<string, ClubRecord>();
+  // key: `${clubId}:${trainerId}`
   private readonly members = new Map<string, MemberRecord>();
+  // key: `${clubId}:${trainerId}:${day}` -> fans
   private readonly daySnapshots = new Map<string, number>();
+  // key: `${clubId}:${trainerId}:${hourIso}` -> fans
   private readonly hourSnapshots = new Map<string, number>();
+  // key: discordId -> trainerId
   private readonly links = new Map<string, string>();
   private readonly filled = new Map<string, string>();
-
-  async init(): Promise<void> {
-    // No schema setup required for in-memory store.
-  }
 
   private memberKey(clubId: string, trainerId: string): string {
     return `${clubId}:${trainerId}`;
@@ -78,7 +62,7 @@ export class MemoryStore implements FanStore {
     return `${clubId}:${trainerId}:${hourIso}`;
   }
 
-  async applySync(snapshot: ClubSnapshot, now: Date): Promise<SyncResult> {
+  applySync(snapshot: ClubSnapshot, now: Date): SyncResult {
     if (snapshot.members.length === 0) {
       throw new Error("refusing to apply an empty roster");
     }
@@ -183,9 +167,8 @@ export class MemoryStore implements FanStore {
       const cutoff = iso(new Date(mark.getTime() - HOUR_HISTORY_DAYS * 24 * 60 * 60 * 1000));
       for (const key of this.hourSnapshots.keys()) {
         if (key.startsWith(`${clubId}:`)) {
-          const firstColon = key.indexOf(":");
-          const secondColon = key.indexOf(":", firstColon + 1);
-          const storedHour = key.slice(secondColon + 1);
+          const parts = key.split(":");
+          const storedHour = parts.slice(2).join(":");
           if (storedHour < cutoff) {
             this.hourSnapshots.delete(key);
           }
@@ -212,7 +195,7 @@ export class MemoryStore implements FanStore {
     };
   }
 
-  async recordSyncError(clubId: string, message: string, now: Date): Promise<void> {
+  recordSyncError(clubId: string, message: string, now: Date): void {
     const prev = this.clubs.get(clubId);
     this.clubs.set(clubId, {
       clubId,
@@ -223,7 +206,7 @@ export class MemoryStore implements FanStore {
     });
   }
 
-  async clubInfo(clubId: string): Promise<ClubInfo> {
+  clubInfo(clubId: string): ClubInfo {
     const club = this.clubs.get(clubId);
     let count = 0;
     for (const rec of this.members.values()) {
@@ -269,7 +252,7 @@ export class MemoryStore implements FanStore {
     return bestFans;
   }
 
-  async standings(clubId: string, period: Period, now: Date): Promise<StandingRow[]> {
+  standings(clubId: string, period: Period, now: Date): StandingRow[] {
     const startDay = periodStartDay(period, now);
     const activeMembers: MemberRecord[] = [];
     for (const rec of this.members.values()) {
@@ -308,48 +291,7 @@ export class MemoryStore implements FanStore {
     }));
   }
 
-  async hourRows(clubId: string, start: Date, end: Date): Promise<HourRow[]> {
-    const activeTrainers = new Set<string>();
-    for (const rec of this.members.values()) {
-      if (rec.clubId === clubId && rec.active) {
-        activeTrainers.add(rec.trainerId);
-      }
-    }
-    if (activeTrainers.size === 0) return [];
-
-    const startIso = iso(start);
-    const endIso = iso(end);
-    const out: HourRow[] = [];
-
-    for (const [key, fans] of this.hourSnapshots.entries()) {
-      const firstColon = key.indexOf(":");
-      const secondColon = key.indexOf(":", firstColon + 1);
-      const trainerId = key.slice(firstColon + 1, secondColon);
-      if (!activeTrainers.has(trainerId)) continue;
-      const hourStr = key.slice(secondColon + 1);
-      if (hourStr >= startIso && hourStr <= endIso) {
-        const parsed = parseIso(hourStr);
-        if (parsed) {
-          out.push({ trainerId, hour: parsed, fans });
-        }
-      }
-    }
-
-    out.sort((a, b) => a.hour.getTime() - b.hour.getTime());
-    return out;
-  }
-
-  async currentFans(clubId: string): Promise<Map<string, number>> {
-    const map = new Map<string, number>();
-    for (const rec of this.members.values()) {
-      if (rec.clubId === clubId && rec.active) {
-        map.set(rec.trainerId, rec.fans);
-      }
-    }
-    return map;
-  }
-
-  async findActiveMember(trainerId: string): Promise<{ clubId: string; name: string; fans: number } | null> {
+  findActiveMember(trainerId: string): { clubId: string; name: string; fans: number } | null {
     let best: MemberRecord | null = null;
     for (const rec of this.members.values()) {
       if (rec.trainerId === trainerId && rec.active) {
@@ -362,17 +304,17 @@ export class MemoryStore implements FanStore {
     return { clubId: best.clubId, name: best.name, fans: best.fans };
   }
 
-  async setLink(discordId: string, trainerId: string): Promise<string | null> {
+  setLink(discordId: string, trainerId: string): string | null {
     const previous = this.links.get(discordId) ?? null;
     this.links.set(discordId, trainerId);
     return previous;
   }
 
-  async getLink(discordId: string): Promise<string | null> {
+  getLink(discordId: string): string | null {
     return this.links.get(discordId) ?? null;
   }
 
-  async removeLink(discordId: string): Promise<boolean> {
+  removeLink(discordId: string): boolean {
     return this.links.delete(discordId);
   }
 }

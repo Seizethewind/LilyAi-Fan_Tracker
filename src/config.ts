@@ -65,23 +65,6 @@ export function aiEnabled(settings: Settings): boolean {
   );
 }
 
-function cliPort(argv: string[] = process.argv.slice(2)): number | null {
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg === "--port" && i + 1 < argv.length) {
-      const parsed = Number.parseInt(argv[i + 1], 10);
-      if (Number.isInteger(parsed) && parsed >= 1) return parsed;
-    } else if (arg.startsWith("--port=")) {
-      const parsed = Number.parseInt(arg.slice("--port=".length), 10);
-      if (Number.isInteger(parsed) && parsed >= 1) return parsed;
-    } else if (/^\d{2,5}$/.test(arg)) {
-      const parsed = Number.parseInt(arg, 10);
-      if (Number.isInteger(parsed) && parsed >= 1) return parsed;
-    }
-  }
-  return null;
-}
-
 export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
   const clubs: [ClubConfig, ClubConfig] = [
     {
@@ -133,7 +116,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean),
-    port: cliPort() ?? intEnv(env, "PORT", 3000, 1),
+    port: intEnv(env, "PORT", 3000, 1),
     onRender: opt(env, "RENDER") !== null,
     aiRouterUrl: routerUrl ? routerUrl.replace(/\/+$/, "") || null : null,
     aiRouterApiKey: opt(env, "AI_ROUTER_API_KEY"),
@@ -145,16 +128,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
 export function validateForRuntime(settings: Settings): string[] {
   const warnings: string[] = [];
   if (Boolean(settings.tursoUrl) !== Boolean(settings.tursoToken)) {
-    const msg = "Set both TURSO_DATABASE_URL and TURSO_AUTH_TOKEN (or neither).";
-    if (settings.onRender) {
-      throw new ConfigError(msg);
-    }
-    warnings.push(`${msg} Using in-memory store.`);
-  }
-  if (settings.onRender && (!settings.tursoUrl || !settings.tursoToken)) {
-    throw new ConfigError(
-      "TURSO_DATABASE_URL and TURSO_AUTH_TOKEN are required when RENDER is set."
-    );
+    warnings.push("TURSO_DATABASE_URL / TURSO_AUTH_TOKEN partially set: using in-memory store.");
   }
   if (!settings.discordToken) {
     warnings.push("DISCORD_TOKEN is not set: running HTTP API only.");

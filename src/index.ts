@@ -1,12 +1,9 @@
-import { createApp } from "./api.js";
+import { DiscordStatusPayload, createApp } from "./api.js";
 import { ConfigError, Settings, loadSettings, validateForRuntime } from "./config.js";
-import { DiscordRunner } from "./discord_bot.js";
-import { createAiAssistant } from "./llm.js";
 import { SyncRunner, startSelfPing } from "./runner.js";
 import { TrackerService } from "./services/tracker.js";
 import { FanSource, SourceError, buildSource } from "./sources/umamoe.js";
-import { FanStore, MemoryStore } from "./storage/store.js";
-import { TursoStore } from "./storage/turso.js";
+import { Store } from "./storage/store.js";
 
 function createSafeSource(settings: Settings): FanSource {
   try {
@@ -22,31 +19,7 @@ function createSafeSource(settings: Settings): FanSource {
   }
 }
 
-async function createAndInitStore(settings: Settings): Promise<FanStore> {
-  if (settings.tursoUrl && settings.tursoToken) {
-    try {
-      const turso = new TursoStore(settings.tursoUrl, settings.tursoToken);
-      await turso.init();
-      console.info("Storage: Turso HTTP");
-      return turso;
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      if (settings.onRender) {
-        throw new Error(`Turso initialization failed on Render: ${reason}`);
-      }
-      console.warn(`Turso unavailable (${reason}); falling back to in-memory store.`);
-    }
-  } else if (settings.onRender) {
-    throw new ConfigError("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN are required on Render.");
-  }
-
-  const memory = new MemoryStore();
-  await memory.init();
-  console.info("Storage: In-memory store");
-  return memory;
-}
-
-async function main(): Promise<void> {
+function main(): void {
   let settings: Settings;
   try {
     settings = loadSettings();
@@ -61,26 +34,32 @@ async function main(): Promise<void> {
     throw err;
   }
 
-  const store = await createAndInitStore(settings);
-
+  const store = new Store();
   const source = createSafeSource(settings);
   const service = new TrackerService(store, source, settings.clubs);
   const syncRunner = new SyncRunner(service, settings.syncIntervalSeconds);
-  const assistant = createAiAssistant(settings, service);
-  const discordRunner = new DiscordRunner({ settings, service, assistant });
+
+  const discordStatus = (): DiscordStatusPayload => {
+    if (!settings.discordToken) {
+      return { state: "disabled", latency_ms: null, error: null };
+    }
+    return {
+      state: "disabled",
+      latency_ms: null,
+      error: "Discord gateway is disabled in the Node.js HTTP API runtime.",
+    };
+  };
 
   const app = createApp({
     settings,
     service,
     syncRunner,
-    discordStatus: () => discordRunner.status(),
-    assistant,
+    discordStatus,
   });
 
   const server = app.listen(settings.port, "0.0.0.0", () => {
-    console.info(`LilyAi Fan Tracker listening on http://0.0.0.0:${settings.port}`);
+    console.info(`LilyAi Fan Tracker API listening on http://0.0.0.0:${settings.port}`);
     syncRunner.start();
-    discordRunner.start();
   });
 
   let stopSelfPing: (() => void) | null = null;
@@ -94,10 +73,8 @@ async function main(): Promise<void> {
   const shutdown = () => {
     syncRunner.stop();
     if (stopSelfPing) stopSelfPing();
-    void discordRunner.close().finally(() => {
-      server.close(() => {
-        process.exit(0);
-      });
+    server.close(() => {
+      process.exit(0);
     });
   };
 
@@ -105,7 +82,4 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
 }
 
-main().catch((err) => {
-  console.error("Fatal startup error:", err);
-  process.exit(1);
-});
+main();

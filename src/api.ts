@@ -1,16 +1,12 @@
-import fs from "node:fs";
-import path from "node:path";
 import cors from "cors";
 import express, { NextFunction, Request, Response } from "express";
 
 import { ApiError, RateLimiter, authorize } from "./auth.js";
 import { ClubConfig, Settings } from "./config.js";
-import { DAYS, HourlyDay } from "./hourly.js";
-import { AiAssistant, ChatTurn, MAX_CONTEXT_CHARS, createAiAssistant } from "./llm.js";
 import { ClubInfo, PERIODS, Period, VERSION } from "./models.js";
 import { SyncRunner, SyncTooSoon } from "./runner.js";
-import { HourlyView, MAX_TOP, TrackerService } from "./services/tracker.js";
-import { gameDay, iso, utcNow } from "./timeutil.js";
+import { MAX_TOP, TrackerService } from "./services/tracker.js";
+import { iso, utcNow } from "./timeutil.js";
 
 export interface DiscordStatusPayload {
   state: string;
@@ -40,35 +36,13 @@ function formatClubStatus(club: ClubConfig, info: ClubInfo): ClubStatusJson {
   };
 }
 
-function formatHourlyPayload(view: HourlyView) {
-  return {
-    club: formatClubStatus(view.club, view.info),
-    day: view.day,
-    game_day: gameDay(view.history.dayStart),
-    day_start: iso(view.history.dayStart),
-    day_end: iso(view.history.dayEnd),
-    first_mark: view.history.firstMark ? iso(view.history.firstMark) : null,
-    starts_late: view.history.startsLate,
-    counted: view.history.counted,
-    total: view.history.total,
-    resets_at: iso(view.resetsAt),
-    lines: view.history.lines.map((line) => ({
-      time: iso(line.time),
-      hours: line.hours,
-      gain: line.gain,
-      since_reset: line.sinceReset,
-      live: line.live,
-    })),
-  };
-}
-
 function buildOpenApiSpec() {
   return {
     openapi: "3.1.0",
     info: {
       title: "LilyAi Fan Tracker API",
       version: VERSION,
-      description: "HTTP API for tracking uma.moe club fan gains and hourly history.",
+      description: "HTTP API for tracking uma.moe club fan gains.",
     },
     paths: {
       "/health": {
@@ -88,16 +62,6 @@ function buildOpenApiSpec() {
           responses: { "200": { description: "Leaderboard" } },
         },
       },
-      "/api/v1/clubs/{club}/hourly": {
-        get: {
-          summary: "Club hourly fan-gain breakdown",
-          parameters: [
-            { name: "club", in: "path", required: true, schema: { type: "string" } },
-            { name: "day", in: "query", schema: { type: "string", enum: ["today", "yesterday"], default: "today" } },
-          ],
-          responses: { "200": { description: "Hourly history" } },
-        },
-      },
       "/api/v1/members/{trainer_id}": {
         get: {
           summary: "Member standings across periods",
@@ -105,33 +69,8 @@ function buildOpenApiSpec() {
           responses: { "200": { description: "Member standings" } },
         },
       },
-      "/api/v1/members/{trainer_id}/hourly": {
-        get: {
-          summary: "Member hourly fan-gain breakdown",
-          parameters: [
-            { name: "trainer_id", in: "path", required: true, schema: { type: "string" } },
-            { name: "day", in: "query", schema: { type: "string", enum: ["today", "yesterday"], default: "today" } },
-          ],
-          responses: { "200": { description: "Member hourly history" } },
-        },
-      },
       "/api/v1/sync": {
         post: { summary: "Trigger immediate sync (write key required)", responses: { "200": { description: "Sync outcomes" } } },
-      },
-      "/api/v1/chat/context": {
-        get: {
-          summary: "Live club context and AI router availability",
-          parameters: [
-            { name: "trainer_id", in: "query", schema: { type: "string" } },
-          ],
-          responses: { "200": { description: "AI chat context" } },
-        },
-      },
-      "/api/v1/chat": {
-        post: {
-          summary: "Test AI mention assistant with reply-chain memory & live club context",
-          responses: { "200": { description: "AI assistant reply" } },
-        },
       },
     },
   };
@@ -156,7 +95,7 @@ const DOCS_HTML = `<!doctype html>
 </head>
 <body>
   <h1>LilyAi Fan Tracker API <span class="muted">v${VERSION}</span></h1>
-  <p class="muted"><a href="/">Open Dashboard</a> · OpenAPI spec: <a href="/api/v1/openapi.json"><code>/api/v1/openapi.json</code></a></p>
+  <p class="muted">OpenAPI spec: <a href="/api/v1/openapi.json"><code>/api/v1/openapi.json</code></a></p>
 
   <div class="endpoint">
     <div><span class="method get">GET</span><code>/health</code> <span class="muted">(public)</span></div>
@@ -174,33 +113,13 @@ const DOCS_HTML = `<!doctype html>
   </div>
 
   <div class="endpoint">
-    <div><span class="method get">GET</span><code>/api/v1/clubs/{club}/hourly?day=today</code> <span class="muted">(Bearer read/write key)</span></div>
-    <p>Hour-by-hour fan gain timeline since the 15:00 UTC reset for <code>today</code> or <code>yesterday</code>.</p>
-  </div>
-
-  <div class="endpoint">
     <div><span class="method get">GET</span><code>/api/v1/members/{trainer_id}</code> <span class="muted">(Bearer read/write key)</span></div>
     <p>Daily, weekly, and monthly gain &amp; rank for an active club member.</p>
   </div>
 
   <div class="endpoint">
-    <div><span class="method get">GET</span><code>/api/v1/members/{trainer_id}/hourly?day=today</code> <span class="muted">(Bearer read/write key)</span></div>
-    <p>Hour-by-hour fan gain timeline for an active club member.</p>
-  </div>
-
-  <div class="endpoint">
     <div><span class="method post">POST</span><code>/api/v1/sync</code> <span class="muted">(Bearer write key)</span></div>
     <p>Triggers an immediate refresh of both clubs (30-second cooldown).</p>
-  </div>
-
-  <div class="endpoint">
-    <div><span class="method get">GET</span><code>/api/v1/chat/context</code> <span class="muted">(Bearer read/write key)</span></div>
-    <p>Returns live club fan-gain context and whether the AI router is configured.</p>
-  </div>
-
-  <div class="endpoint">
-    <div><span class="method post">POST</span><code>/api/v1/chat</code> <span class="muted">(Bearer read/write key)</span></div>
-    <p>Tests Lily AI replies with multi-turn thread history, optional replied-to text, and live club context.</p>
   </div>
 </body>
 </html>`;
@@ -210,10 +129,8 @@ export function createApp(options: {
   service: TrackerService;
   syncRunner: SyncRunner;
   discordStatus: () => DiscordStatusPayload;
-  assistant?: AiAssistant;
 }): express.Express {
   const { settings, service, syncRunner, discordStatus } = options;
-  const assistant = options.assistant ?? createAiAssistant(settings, service);
   const app = express();
   app.use(express.json());
 
@@ -254,17 +171,15 @@ export function createApp(options: {
   const readAccess = requireAuth(false);
   const writeAccess = requireAuth(true);
 
-  function parseParam(raw: string | string[]): string {
-    return Array.isArray(raw) ? raw[0] ?? "" : raw;
-  }
-
-  function parseDayQuery(raw: unknown): HourlyDay {
-    const val = typeof raw === "string" ? raw : "today";
-    if (!DAYS.includes(val as HourlyDay)) {
-      throw new ApiError(422, "invalid_request", "query.day: Input should be 'today' or 'yesterday'");
-    }
-    return val as HourlyDay;
-  }
+  app.get("/", (_req, res) => {
+    res.json({
+      name: "LilyAi Fan Tracker API",
+      version: VERSION,
+      health: "/health",
+      docs: "/api/v1/docs",
+      openapi: "/api/v1/openapi.json",
+    });
+  });
 
   app.get("/health", (_req, res) => {
     res.json({ status: "ok", version: VERSION });
@@ -278,24 +193,20 @@ export function createApp(options: {
     res.type("html").send(DOCS_HTML);
   });
 
-  app.get("/api/v1/status", readAccess, async (_req, res, next) => {
-    try {
-      const infos = await service.clubInfos();
-      res.json({
-        server: "ok",
-        version: VERSION,
-        time: iso(utcNow()),
-        discord: discordStatus(),
-        clubs: infos.map(([club, info]) => formatClubStatus(club, info)),
-      });
-    } catch (err) {
-      next(err);
-    }
+  app.get("/api/v1/status", readAccess, (_req, res) => {
+    res.json({
+      server: "ok",
+      version: VERSION,
+      time: iso(utcNow()),
+      discord: discordStatus(),
+      clubs: service.clubInfos().map(([club, info]) => formatClubStatus(club, info)),
+    });
   });
 
-  app.get("/api/v1/clubs/:club/leaderboard", readAccess, async (req, res, next) => {
+  app.get("/api/v1/clubs/:club/leaderboard", readAccess, (req, res, next) => {
     try {
-      const clubParam = parseParam(req.params.club);
+      const rawClubParam = req.params.club;
+      const clubParam = Array.isArray(rawClubParam) ? rawClubParam[0] ?? "" : rawClubParam;
       const club = service.club(clubParam);
       if (!club) {
         throw new ApiError(
@@ -331,7 +242,7 @@ export function createApp(options: {
         }
       }
 
-      const board = await service.leaderboard(club, period, top);
+      const board = service.leaderboard(club, period, top);
       res.json({
         club: formatClubStatus(club, board.info),
         period,
@@ -351,29 +262,11 @@ export function createApp(options: {
     }
   });
 
-  app.get("/api/v1/clubs/:club/hourly", readAccess, async (req, res, next) => {
+  app.get("/api/v1/members/:trainer_id", readAccess, (req, res, next) => {
     try {
-      const clubParam = parseParam(req.params.club);
-      const club = service.club(clubParam);
-      if (!club) {
-        throw new ApiError(
-          404,
-          "club_not_found",
-          `Unknown club '${clubParam}'. Use club1, club2 or a configured club id.`
-        );
-      }
-      const day = parseDayQuery(req.query.day);
-      const view = await service.fanGainHistory(club, day);
-      res.json(formatHourlyPayload(view));
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  app.get("/api/v1/members/:trainer_id", readAccess, async (req, res, next) => {
-    try {
-      const trainerId = parseParam(req.params.trainer_id);
-      const standings = await service.allStandingsForTrainer(trainerId);
+      const rawTrainerId = req.params.trainer_id;
+      const trainerId = Array.isArray(rawTrainerId) ? rawTrainerId[0] ?? "" : rawTrainerId;
+      const standings = service.allStandingsForTrainer(trainerId);
       const first = PERIODS.map((p) => standings[p]).find((s) => s !== undefined);
       if (!first) {
         throw new ApiError(
@@ -408,28 +301,6 @@ export function createApp(options: {
     }
   });
 
-  app.get("/api/v1/members/:trainer_id/hourly", readAccess, async (req, res, next) => {
-    try {
-      const trainerId = parseParam(req.params.trainer_id);
-      const day = parseDayQuery(req.query.day);
-      const view = await service.trainerFanGainHistory(trainerId, day);
-      if (!view) {
-        throw new ApiError(
-          404,
-          "member_not_found",
-          "That trainer is not on a club roster right now."
-        );
-      }
-      res.json({
-        trainer_id: view.trainerId,
-        name: view.trainerName,
-        ...formatHourlyPayload(view),
-      });
-    } catch (err) {
-      next(err);
-    }
-  });
-
   app.post("/api/v1/sync", writeAccess, async (_req, res, next) => {
     try {
       const outcomes = await syncRunner.syncNow();
@@ -457,169 +328,14 @@ export function createApp(options: {
     }
   });
 
-  app.get("/api/v1/chat/context", readAccess, async (req, res, next) => {
-    try {
-      const rawTrainer = typeof req.query.trainer_id === "string" ? req.query.trainer_id.trim() : "";
-      if (rawTrainer.length > 32) {
-        throw new ApiError(422, "invalid_request", "query.trainer_id must be 32 characters or fewer.");
-      }
-      const context = await assistant.getLiveContext({
-        trainerId: rawTrainer || null,
-      });
-      res.json({
-        ai_enabled: assistant.isEnabled(),
-        model: assistant.model,
-        cooldown_seconds: assistant.userCooldownSeconds,
-        outage_remaining_seconds: assistant.outageRemainingSeconds(),
-        context,
-      });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  app.post("/api/v1/chat", readAccess, async (req, res, next) => {
-    try {
-      const body = req.body as {
-        messages?: unknown;
-        replied_text?: unknown;
-        trainer_id?: unknown;
-      };
-
-      if (!body || !Array.isArray(body.messages) || body.messages.length === 0) {
-        throw new ApiError(422, "invalid_request", "messages must be a non-empty array.");
-      }
-      if (body.messages.length > 12) {
-        throw new ApiError(422, "invalid_request", "messages cannot exceed 12 turns.");
-      }
-
-      const validated: ChatTurn[] = [];
-      for (const item of body.messages) {
-        if (!item || typeof item !== "object") {
-          throw new ApiError(422, "invalid_request", "Each message must be an object.");
-        }
-        const role = (item as { role?: unknown }).role;
-        const content = (item as { content?: unknown }).content;
-        if (role !== "user" && role !== "assistant") {
-          throw new ApiError(422, "invalid_request", "Message role must be 'user' or 'assistant'.");
-        }
-        if (typeof content !== "string" || content.trim().length === 0) {
-          throw new ApiError(422, "invalid_request", "Message content must be a non-empty string.");
-        }
-        if (content.length > MAX_CONTEXT_CHARS) {
-          throw new ApiError(
-            422,
-            "invalid_request",
-            `Message content must be ${MAX_CONTEXT_CHARS} characters or fewer.`
-          );
-        }
-        validated.push({ role, content: content.trim() });
-      }
-
-      const lastTurn = validated[validated.length - 1];
-      if (lastTurn.role !== "user") {
-        throw new ApiError(422, "invalid_request", "The last message must have role 'user'.");
-      }
-
-      let repliedTo: ChatTurn | null = null;
-      if (body.replied_text !== undefined && body.replied_text !== null) {
-        if (typeof body.replied_text !== "string") {
-          throw new ApiError(422, "invalid_request", "replied_text must be a string.");
-        }
-        if (body.replied_text.length > MAX_CONTEXT_CHARS) {
-          throw new ApiError(
-            422,
-            "invalid_request",
-            `replied_text must be ${MAX_CONTEXT_CHARS} characters or fewer.`
-          );
-        }
-        if (body.replied_text.trim()) {
-          repliedTo = {
-            role: "user",
-            author: "Replied message",
-            content: body.replied_text.trim(),
-          };
-        }
-      }
-
-      let trainerId: string | null = null;
-      if (body.trainer_id !== undefined && body.trainer_id !== null) {
-        if (typeof body.trainer_id !== "string" || body.trainer_id.trim().length > 32) {
-          throw new ApiError(422, "invalid_request", "trainer_id must be a string up to 32 characters.");
-        }
-        trainerId = body.trainer_id.trim() || null;
-      }
-
-      if (!assistant.isEnabled()) {
-        throw new ApiError(
-          503,
-          "ai_disabled",
-          "AI chat is disabled: configure AI_ROUTER_URL and AI_ROUTER_API_KEY on the server."
-        );
-      }
-
-      const history = validated.slice(0, -1);
-      const result = await assistant.answer({
-        userKey: `web:${trainerId ?? "tester"}`,
-        question: lastTurn.content,
-        history,
-        repliedTo,
-        trainerId,
-        respectCooldown: true,
-      });
-
-      if (result.cooldownRemaining > 0) {
-        throw new ApiError(429, "rate_limited", result.reply, {
-          "Retry-After": String(result.cooldownRemaining),
-        });
-      }
-
-      if (result.unavailable) {
-        const headers: Record<string, string> = {};
-        if (result.retryAfterSeconds) {
-          headers["Retry-After"] = String(result.retryAfterSeconds);
-        }
-        throw new ApiError(503, "ai_unavailable", result.reply, headers);
-      }
-
-      res.json({
-        reply: result.reply,
-        model: result.model,
-        latency_ms: result.latencyMs,
-        context_summary: result.context.summary_text,
-        context: result.context,
-      });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // Unknown API routes return consistent JSON 404
-  app.use("/api", (_req, res) => {
+  // 404 fallback in standard JSON error format
+  app.use((_req, res) => {
     res.status(404).json({
       error: { code: "http_error", message: "Not Found" },
     });
   });
 
-  // Serve built Vite SPA frontend
-  const clientDistDir = path.resolve(process.cwd(), "dist/client");
-  if (fs.existsSync(clientDistDir)) {
-    app.use(express.static(clientDistDir));
-    app.get("/{*splat}", (_req, res) => {
-      res.sendFile(path.join(clientDistDir, "index.html"));
-    });
-  } else {
-    app.get("/", (_req, res) => {
-      res.json({
-        name: "LilyAi Fan Tracker API",
-        version: VERSION,
-        health: "/health",
-        docs: "/api/v1/docs",
-        openapi: "/api/v1/openapi.json",
-      });
-    });
-  }
-
+  // Error handler
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     if (err instanceof ApiError) {
       for (const [k, v] of Object.entries(err.headers)) {
